@@ -754,20 +754,26 @@ function forearm(parent, wrist, elbow){
   // Right hand on the pistol grip (grip leans back toward the bottom)
   const X = new V3(1,0,0), Y = new V3(0,0.94,-0.33).normalize(), Z = new V3().crossVectors(X, Y);
   const pos = new V3(0.029,-0.098,0.118);
-  const hand = makeHand({curls:[[0.6,0.95,0.6],[1.3,1.35,0.9],[1.35,1.35,0.9],[1.35,1.3,0.85]], thumbCurls:[0.4,0.4,0.3], thumbRot:[0,0.95,0]});
-  modelHands.add(placeHand(hand, pos, X, Y, Z));
+  const hand = makeHand({curls:[[0.95,1.05,0.35],[1.45,1.1,0.35],[1.45,1.1,0.35],[1.45,1.05,0.35]], thumbCurls:[0.5,0.3,0.2], thumbRot:[0.35,1.0,0]});
+  modelHands.add(placeHand(hand, pos, X, Y, Z)); hand.scale.set(1.12,1.12,0.92);
   forearm(modelHands, pos.clone().addScaledVector(Z, 0.07), new V3(0.12,-0.25,0.5));
 }
 {
-  // Left (support) hand: a mirrored hand under the handguard, palm up, angled along the rifle.
-  // Thumb runs forward along the left side, fingers wrap up the right side, forearm runs back under the rifle.
-  const yaw = new THREE.Matrix4().makeRotationY(0.35);
-  const X = new V3(0,1,0).applyMatrix4(yaw), Y = new V3(0,0,-1).applyMatrix4(yaw), Z = new V3(-1,0,0).applyMatrix4(yaw);
-  const pos = new V3(-0.024,-0.023,-0.185);
-  const hand = makeHand({curls:[[1.3,1.15,0.75],[1.35,1.2,0.75],[1.35,1.2,0.75],[1.35,1.15,0.75]], thumbCurls:[0.12,0.08,0.05], thumbRot:[Math.PI/2,0,0]});
-  placeHand(hand, pos, X, Y, Z); hand.scale.x = -1;
+  // Left (support) hand: mirrored hand gripping the LEFT side of the handguard near the front sight (C-grip).
+  // Back of the glove faces out-left toward the camera, fingers lean toward the muzzle and curl over the top,
+  // forearm is one straight sleeve coming in from the bottom-left corner.
+  const lean = 0.5, yawB = 0.3;
+  const R = new THREE.Matrix4().makeRotationY(-yawB);
+  const Z = new V3(0,-Math.cos(lean), Math.sin(lean)).applyMatrix4(R);
+  const X = new V3(1,0,0).applyMatrix4(R);
+  const Y = new V3().crossVectors(Z, X);
+  const pos = new V3(-0.036,-0.004,-0.235);
+  const hand = makeHand({curls:[[1.2,1.05,0.65],[1.25,1.1,0.65],[1.25,1.1,0.65],[1.2,1.05,0.65]], thumbCurls:[0.3,0.15,0.1], thumbRot:[-Math.PI/2,0,0]});
+  placeHand(hand, pos, X, Y, Z); hand.scale.set(-1.15, 1.15, 1.15);
   modelHands.add(hand);
-  forearm(modelHands, pos.clone().addScaledVector(Z, 0.07), new V3(-0.05,-0.13,0.17));
+  const wrist = pos.clone().addScaledVector(Z, 0.055), elbow = new V3(-0.33,-0.33,0.1);
+  modelHands.add(limb(wrist, elbow, 0.043, 0.064, HM.sleeve));
+  [[wrist,0.043],[elbow,0.064]].forEach(([p, r]) => { const c = new THREE.Mesh(_sph, HM.sleeve); c.scale.setScalar(r); c.position.copy(p); modelHands.add(c); });
 }
 {
   // Right hand around the knife handle (knife frame: blade up, handle below)
@@ -1587,7 +1593,7 @@ function loadModels(){
     MODELS.rifle = m;
     rifleHolder.add(m.clone());
     procGun.visible = false; modelHands.visible = true;
-    HIP.set(0.11,-0.08,-0.38); ADS.set(-0.001,-0.0707,-0.27); VM_FOV_HIP = 68;
+    HIP.set(0.078,-0.072,-0.34); ADS.set(-0.001,-0.0707,-0.27); VM_FOV_HIP = 60; VM_FOV_ADS = 34;
     flash.position.set(0,0.016,-0.37);
     eachAvatar(attachModels);
   }, undefined, () => {});
