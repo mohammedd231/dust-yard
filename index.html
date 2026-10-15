@@ -51,6 +51,13 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 .slots span.on{color:#1a1307;background:var(--brass);border-color:var(--brass)}
 .xhair{position:absolute;left:50%;top:50%;width:0;height:0}
 .xhair i{position:absolute;background:var(--fg);box-shadow:0 0 2px #000}
+.reticle{position:absolute;left:50%;top:50%;width:0;height:0;opacity:0}
+.reticle i{position:absolute;background:#0d0d0c;box-shadow:0 0 0 1px rgba(255,255,255,.28)}
+.reticle .t,.reticle .b{width:1.5px;left:-0.75px;height:13px}
+.reticle .t{top:-19px}.reticle .b{top:6px}
+.reticle .l,.reticle .r{height:1.5px;top:-0.75px;width:13px}
+.reticle .l{left:-19px}.reticle .r{left:6px}
+.reticle b{position:absolute;width:4px;height:4px;left:-2px;top:-2px;border-radius:50%;background:#ff3b2f;box-shadow:0 0 5px 1px rgba(255,60,40,.85)}
 .xhair .t,.xhair .b{width:2px;height:9px;left:-1px}
 .xhair .l,.xhair .r{height:2px;width:9px;top:-1px}
 .hitm{position:absolute;left:50%;top:50%;opacity:0}
@@ -150,6 +157,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
   <div class="net" id="net"><span class="dot"></span><span id="netText">Connecting…</span></div>
   <div class="score" id="scoreLine"></div>
   <div class="feed" id="feed"></div>
+  <div class="reticle" id="reticle"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><b></b></div>
   <div class="xhair" id="xhair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
   <div class="hitm" id="hitm"><i></i><i></i><i></i><i></i></div>
   <div class="dmgdir" id="dmgdir"><i></i></div>
@@ -673,17 +681,96 @@ const knifeHolder = new THREE.Group(); knifeUp.add(knifeHolder);
   const blade = new THREE.Mesh(bg, bladeMat); blade.position.z = -0.012; procKnife.add(blade);
   const grip = new THREE.Mesh(box(0.026,0.032,0.12), new THREE.MeshStandardMaterial({color:0x1d1c18, roughness:0.85})); grip.position.z = 0.06; procKnife.add(grip);
   const guard = new THREE.Mesh(box(0.012,0.06,0.012), steelDark); guard.position.z = -0.002; procKnife.add(guard);
-  const fist = new THREE.Mesh(box(0.06,0.07,0.095), glove); fist.position.set(0,-0.004,0.07); fist.scale.set(1.25,1.15,1.1); knifeUp.add(fist);
-  const arm = new THREE.Mesh(box(0.085,0.085,0.42), sleeve); arm.position.set(0.05,-0.24,0.13); arm.rotation.set(-0.95,0.25,0); knife.add(arm);
 }
 const HIP = new V3(0.13,-0.145,-0.22), ADS = new V3(0,-0.0775,-0.085);
 const modelHands = new THREE.Group(); modelHands.visible = false; gun.add(modelHands);
+/* Articulated first-person hands.
+   Hand frame: back of hand +X, palm faces -X, knuckles stacked along Y (index on top),
+   fingers point -Z and curl toward -X (around whatever is held). */
+const srgb = h => new THREE.Color(h).convertSRGBToLinear();
+const HM = {
+  glove: new THREE.MeshStandardMaterial({color:srgb(0x34352e), roughness:0.85}),
+  gloveDark: new THREE.MeshStandardMaterial({color:srgb(0x1f201c), roughness:0.9}),
+  skin: new THREE.MeshStandardMaterial({color:srgb(0xb47a5a), roughness:0.6}),
+  sleeve: new THREE.MeshStandardMaterial({color:srgb(0x5a5c43), roughness:0.95})
+};
+const _sph = new THREE.SphereGeometry(1, 14, 10);
+function capsule(r, len, m){
+  const g = new THREE.Group();
+  const c = new THREE.Mesh(new THREE.CylinderGeometry(r*0.94, r, len, 12), m); c.rotation.x = Math.PI/2; c.position.z = -len/2; g.add(c);
+  const a = new THREE.Mesh(_sph, m); a.scale.setScalar(r); g.add(a);
+  const b = new THREE.Mesh(_sph, m); b.scale.setScalar(r*0.94); b.position.z = -len; g.add(b);
+  return g;
+}
+function digit(lens, rads, curls, mats){
+  const root = new THREE.Group(); let parent = root;
+  for(let i=0;i<lens.length;i++){
+    const j = new THREE.Group(); j.rotation.y = curls[i]; parent.add(j);
+    j.add(capsule(rads[i], lens[i], mats[i]));
+    const nx = new THREE.Group(); nx.position.z = -lens[i]; j.add(nx); parent = nx;
+  }
+  return root;
+}
+function makeHand(o){
+  const h = new THREE.Group();
+  const palm = new THREE.Mesh(_sph, HM.glove); palm.scale.set(0.017, 0.042, 0.047); h.add(palm);
+  const back = new THREE.Mesh(_sph, HM.gloveDark); back.scale.set(0.008, 0.034, 0.03); back.position.set(0.012, 0.004, -0.004); h.add(back);
+  const F = [
+    {y:0.029, l:[0.038,0.024,0.019], r:0.0098},
+    {y:0.0095,l:[0.042,0.027,0.021], r:0.0102},
+    {y:-0.0095,l:[0.039,0.025,0.02], r:0.0097},
+    {y:-0.028,l:[0.031,0.02,0.017], r:0.0086}
+  ];
+  const mats = [HM.glove, HM.skin, HM.skin];
+  F.forEach((f, i) => {
+    const d = digit(f.l, [f.r, f.r*0.93, f.r*0.86], o.curls[i], mats);
+    d.position.set(-0.003, f.y, -0.039); h.add(d);
+    const k = new THREE.Mesh(_sph, HM.gloveDark); k.scale.setScalar(f.r*1.12); k.position.set(0.003, f.y, -0.04); h.add(k);
+  });
+  const th = digit([0.034,0.027,0.021], [0.0118,0.0105,0.0095], o.thumbCurls, [HM.glove, HM.glove, HM.skin]);
+  const tr = new THREE.Group(); tr.position.set(-0.012, 0.03, 0.006); tr.rotation.set(o.thumbRot[0], o.thumbRot[1], o.thumbRot[2]); tr.add(th); h.add(tr);
+  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.033, 0.04, 14), HM.gloveDark); cuff.rotation.x = Math.PI/2; cuff.position.z = 0.055; cuff.scale.set(0.75,1,1.15); h.add(cuff);
+  return h;
+}
+function placeHand(hand, pos, X, Y, Z){ hand.setRotationFromMatrix(new THREE.Matrix4().makeBasis(X, Y, Z)); hand.position.copy(pos); return hand; }
+function limb(a, b, r1, r2, m){
+  const d = b.clone().sub(a), len = d.length();
+  const me = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, len, 14), m);
+  me.position.copy(a).add(b).multiplyScalar(0.5);
+  me.quaternion.setFromUnitVectors(new V3(0,1,0), d.normalize());
+  return me;
+}
+function forearm(parent, wrist, elbow){
+  const dir = elbow.clone().sub(wrist).normalize();
+  parent.add(limb(wrist, wrist.clone().addScaledVector(dir, 0.06), 0.028, 0.033, HM.gloveDark));
+  parent.add(limb(wrist.clone().addScaledVector(dir, 0.05), elbow, 0.036, 0.047, HM.sleeve));
+}
 {
-  const hr = part(box(0.06,0.065,0.09), glove, 0.004,-0.09,0.115, -0.3, modelHands); part(box(0.08,0.08,0.4), sleeve, 0.06,-0.15,0.3, 0.3, hr);
-  const hl = part(box(0.075,0.05,0.11), glove, -0.004,-0.012,-0.16, 0, modelHands); part(box(0.08,0.08,0.45), sleeve, -0.12,-0.08,0.22, 0.2, hl);
+  // Right hand on the pistol grip (grip leans back toward the bottom)
+  const X = new V3(1,0,0), Y = new V3(0,0.94,-0.33).normalize(), Z = new V3().crossVectors(X, Y);
+  const pos = new V3(0.029,-0.098,0.118);
+  const hand = makeHand({curls:[[0.55,0.9,0.55],[1.05,1.15,0.75],[1.1,1.15,0.75],[1.1,1.1,0.7]], thumbCurls:[0.35,0.35,0.25], thumbRot:[0,0.95,0]});
+  modelHands.add(placeHand(hand, pos, X, Y, Z));
+  forearm(modelHands, pos.clone().addScaledVector(Z, 0.07), new V3(0.12,-0.25,0.5));
+}
+{
+  // Left hand under the handguard: palm up, fingers wrap over the right side, thumb along the left side
+  const X = new V3(0,-1,0), Y = new V3(0,0,1), Z = new V3(-1,0,0);
+  const pos = new V3(-0.006,-0.022,-0.165);
+  const hand = makeHand({curls:[[1.4,1.25,0.8],[1.45,1.3,0.8],[1.45,1.3,0.8],[1.45,1.25,0.8]], thumbCurls:[-0.08,-0.12,-0.08], thumbRot:[-Math.PI/2,-0.25,0]});
+  modelHands.add(placeHand(hand, pos, X, Y, Z));
+  forearm(modelHands, pos.clone().addScaledVector(Z, 0.07), new V3(-0.22,-0.26,0.22));
+}
+{
+  // Right hand around the knife handle (knife frame: blade up, handle below)
+  const X = new V3(1,0,0), Y = new V3(0,1,0), Z = new V3(0,0,1);
+  const pos = new V3(0.036,-0.072,0.002);
+  const hand = makeHand({curls:[[1.15,1.05,0.7],[1.15,1.1,0.7],[1.15,1.1,0.7],[1.15,1.05,0.7]], thumbCurls:[0.45,0.35,0.25], thumbRot:[0,1.05,0]});
+  knife.add(placeHand(hand, pos, X, Y, Z));
+  forearm(knife, pos.clone().addScaledVector(Z, 0.07), new V3(0.13,-0.36,0.3));
 }
 const SWITCH_TIME = 0.5;
-const KIDLE = {p:[0.165,-0.165,-0.4], r:[-0.12,0.15,0.22]}, KHIDE = {p:[0.24,-0.5,-0.36], r:[0.5,0.2,-0.3]};
+const KIDLE = {p:[0.15,-0.135,-0.4], r:[-0.12,0.15,0.2]}, KHIDE = {p:[0.24,-0.5,-0.36], r:[0.5,0.2,-0.3]};
 const KSWING = [[0.2, [0.3,-0.1,-0.37], [0.15,0.35,-0.45]], [0.45, [-0.14,-0.2,-0.44], [-0.95,-0.2,1.35]], [0.62, [-0.1,-0.23,-0.42], [-0.8,-0.15,1.15]]];
 function knifePose(p, idle){
   const keys = [[0, idle.p, idle.r], ...KSWING, [1, idle.p, idle.r]];
@@ -1256,6 +1343,7 @@ function updateHUD(dt, t){
   $('reloadHint').hidden = kn || !(P.alive && P.reload <= 0 && P.mag <= 7 && P.reserve > 0);
   if(P.reload > 0){ $('reloadHint').hidden = false; $('reloadHint').textContent = 'Reloading…'; } else $('reloadHint').textContent = 'Press R to reload';
   const gap = P.weapon === 1 ? 4 : 5 + currentSpread()*520;
+  $('reticle').style.opacity = (P.alive && P.weapon === 2 && P.switchT <= 0) ? clamp((P.ads - 0.45)*2.6, 0, 1) : 0;
   const xh = $('xhair'); xh.style.opacity = (P.alive && P.ads < 0.6 && !P.sprint) ? 1 : 0;
   xh.children[0].style.top = (-gap-9)+'px'; xh.children[1].style.top = gap+'px';
   xh.children[2].style.left = (-gap-9)+'px'; xh.children[3].style.left = gap+'px';
