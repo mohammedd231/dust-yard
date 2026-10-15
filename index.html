@@ -1147,6 +1147,40 @@ function currentSpread(){
   return s + P.bloom;
 }
 let ARMS = null;   // animated first-person arms + AK-74U (models/arms.glb)
+let KARMS = null;  // second copy of the same arms: right hand holds the knife, left arm hidden
+let knifeArmsGltf = null;
+function setupKnifeArms(){
+  if(KARMS || !knifeArmsGltf || !MODELS.knife) return;
+  const g = knifeArmsGltf, root = g.scene;
+  root.traverse(o => {
+    if(!o.isMesh) return;
+    o.frustumCulled = false; o.castShadow = false;
+    const mn = (o.material && o.material.name) || '';
+    if(/Krinkov|Magazine|Null/.test(mn)) o.visible = false;   // hide the rifle, keep the arms
+  });
+  const mixer = new THREE.AnimationMixer(root);
+  const clip = g.animations.find(c => c.name === 'IDLE'); if(!clip) return;
+  const idle = mixer.clipAction(clip); idle.play(); mixer.update(0); root.updateMatrixWorld(true);
+  const find = re => { let r = null; root.traverse(o => { if(!r && o.isBone && re.test(o.name)) r = o; }); return r; };
+  const hand = find(/RightHand_?0?23$/) || find(/RightHand(?!Thumb|Index|Middle|Ring|Pinky)/);
+  const lsh = find(/LeftShoulder/);
+  const fingers = ['Index','Middle','Ring','Pinky'].map(f => [1,2,3].map(i => find(new RegExp('RightHand' + f + i))));
+  if(!hand) return;
+  // Knife handle sits along the pistol-grip axis inside the fist; blade points up, edge forward.
+  const up = new V3(0, 0.936, -0.35).normalize(), Yk = new V3(0, 0.35, 0.936).normalize(), Zk = up.clone().negate();
+  const Xk = new V3().crossVectors(Yk, Zk);
+  const kn = MODELS.knife.clone();
+  kn.setRotationFromMatrix(new THREE.Matrix4().makeBasis(Xk, Yk, Zk));
+  const hc = new V3(0.067, 1.445, -0.145);
+  kn.position.copy(hc).sub(new V3(0, 0, 0.065).applyQuaternion(kn.quaternion));
+  root.add(kn); root.updateMatrixWorld(true); hand.attach(kn);
+  const pivot = new THREE.Group(); root.position.copy(hc).negate(); pivot.add(root);
+  const vm = new THREE.Group(); vm.add(pivot); vm.visible = false; wScene.add(vm);
+  KARMS = {root, mixer, hand, lsh, fingers, pivot, vm, hc, knife: kn,
+           curlAxis: new V3(0, 0, 1), curl: [0.9, 0.9, 0.6], indexExtra: 0.3,
+           off: new V3(0.02, 0.03, -0.21), rot: new THREE.Euler(0.05, -0.35, 0.3)};
+}
+
 const _qa = new THREE.Quaternion(), _qe = new THREE.Quaternion(), _eu = new THREE.Euler(), _m4 = new THREE.Matrix4();
 const _va = new V3(), _vb = new V3(), _vc = new V3(), _negZ = new V3(0,0,-1);
 function armsPlay(name, fade){
@@ -1650,6 +1684,7 @@ function loadModels(){
     mixer.addEventListener('finished', e => { if(ARMS.cur && e.action === ARMS.cur) armsToIdle(0.15); });
     VM_FOV_HIP = 62; VM_FOV_ADS = 46;
     if(deployed && P.weapon === 2) armsPlay('DRAW', 0.02);
+    loader.load('models/arms.glb', g2 => { knifeArmsGltf = g2; setupKnifeArms(); }, undefined, () => {});
   }, undefined, err => console.warn('Arms model failed to load; using the basic rifle.', err));
   loader.load('models/knife.glb', g => {
     const m = prepModel(g.scene);
@@ -1657,6 +1692,7 @@ function loadModels(){
     const holder = new THREE.Group(); holder.add(inner);
     MODELS.knife = holder;
     knifeHolder.add(holder.clone()); procKnife.visible = false;
+    setupKnifeArms();
     eachAvatar(attachModels);
   }, undefined, () => {});
 }
@@ -1786,6 +1822,27 @@ function update(dt, t){
     knife.position.set(kp.p[0] + bx*1.4 + P.swayX*sw, kp.p[1] + by*1.4 + P.swayY*sw - drop*0.32 - sk*0.05, kp.p[2]);
     knife.rotation.set(kp.r[0] - drop*0.7 - sk*0.25, kp.r[1] + sk*0.3, kp.r[2]);
   } else knife.visible = false;
+  if(KARMS){
+    const showK = knife.visible && P.alive;
+    knife.visible = false;               // the old code-built knife hand is replaced
+    KARMS.vm.visible = showK;
+    if(showK){
+      KARMS.mixer.update(dt);
+      if(KARMS.lsh) KARMS.lsh.scale.setScalar(0.001);
+      KARMS.fingers.forEach((chain, fi) => chain.forEach((b, j) => { if(b){ _qa.setFromAxisAngle(KARMS.curlAxis, KARMS.curl[j] * (fi === 0 ? 1 + KARMS.indexExtra : 1) * (j === 0 && fi === 0 ? 1 : 1)); b.quaternion.multiply(_qa); } }));
+      // Same pose maths as the old knife: idle + slash keyframes, applied around the hand
+      const idleP = knifeOut ? KIDLE : KHIDE;
+      const kp = (P.melee > 0) ? knifePose(1 - P.melee/MELEE_TIME, idleP) : {p:idleP.p.slice(), r:idleP.r.slice()};
+      // Slash: swing the whole arm around the shoulder (camera), so the upper arm never fills the screen
+      const dp = new V3(kp.p[0]-KIDLE.p[0], kp.p[1]-KIDLE.p[1], kp.p[2]-KIDLE.p[2]).multiplyScalar(0.35);
+      const rs = 0.4;
+      _qe.setFromEuler(_eu.set((kp.r[0]-KIDLE.r[0])*rs - drop*0.7 - sk*0.25, (kp.r[1]-KIDLE.r[1])*rs*0.6 + sk*0.3, (kp.r[2]-KIDLE.r[2])*rs));
+      const handPos = (ARMS ? ARMS.hipT.clone() : new V3(0,-1.588,-0.03)).add(KARMS.hc).add(KARMS.off).add(dp);
+      KARMS.vm.quaternion.copy(_qe);
+      KARMS.vm.position.copy(handPos.applyQuaternion(_qe)).add(_vc.set(bx*1.2 + P.swayX, by*1.2 + P.swayY - drop*0.3 - sk*0.05, 0));
+      KARMS.pivot.rotation.copy(KARMS.rot);
+    }
+  }
   gunRoot.rotation.set(rx, ry, rz);
   if(ARMS){
     gunRoot.visible = false;
