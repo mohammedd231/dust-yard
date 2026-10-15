@@ -659,8 +659,11 @@ const fB = new THREE.Mesh(new THREE.PlaneGeometry(0.09,0.34), flashMatW); fB.rot
 const fC = fB.clone(); fC.rotation.set(Math.PI/2, Math.PI/2, 0); flash.add(fC);
 flash.visible = false;
 const knife = new THREE.Group(); knife.visible = false; wScene.add(knife);
-const procKnife = new THREE.Group(); knife.add(procKnife);
-const knifeHolder = new THREE.Group(); knife.add(knifeHolder);
+// knifeUp turns the knife (built blade-forward, edge-down) so the blade points up, the edge faces the screen centre and the flat faces the camera
+const knifeUp = new THREE.Group(); knife.add(knifeUp);
+knifeUp.setRotationFromMatrix(new THREE.Matrix4().makeBasis(new V3(0,0,-1), new V3(1,0,0), new V3(0,-1,0)));
+const procKnife = new THREE.Group(); knifeUp.add(procKnife);
+const knifeHolder = new THREE.Group(); knifeUp.add(knifeHolder);
 {
   const bladeMat = new THREE.MeshStandardMaterial({color:0xc2c7cc, roughness:0.22, metalness:0.92});
   const sh = new THREE.Shape();
@@ -670,8 +673,8 @@ const knifeHolder = new THREE.Group(); knife.add(knifeHolder);
   const blade = new THREE.Mesh(bg, bladeMat); blade.position.z = -0.012; procKnife.add(blade);
   const grip = new THREE.Mesh(box(0.026,0.032,0.12), new THREE.MeshStandardMaterial({color:0x1d1c18, roughness:0.85})); grip.position.z = 0.06; procKnife.add(grip);
   const guard = new THREE.Mesh(box(0.012,0.06,0.012), steelDark); guard.position.z = -0.002; procKnife.add(guard);
-  const fist = new THREE.Mesh(box(0.06,0.07,0.095), glove); fist.position.set(0.012,-0.008,0.065); knife.add(fist);
-  const arm = new THREE.Mesh(box(0.08,0.08,0.4), sleeve); arm.position.set(0.03,-0.03,0.28); knife.add(arm);
+  const fist = new THREE.Mesh(box(0.06,0.07,0.095), glove); fist.position.set(0,-0.004,0.07); fist.scale.set(1.25,1.15,1.1); knifeUp.add(fist);
+  const arm = new THREE.Mesh(box(0.085,0.085,0.42), sleeve); arm.position.set(0.05,-0.24,0.13); arm.rotation.set(-0.95,0.25,0); knife.add(arm);
 }
 const HIP = new V3(0.13,-0.145,-0.22), ADS = new V3(0,-0.0775,-0.085);
 const modelHands = new THREE.Group(); modelHands.visible = false; gun.add(modelHands);
@@ -680,8 +683,8 @@ const modelHands = new THREE.Group(); modelHands.visible = false; gun.add(modelH
   const hl = part(box(0.075,0.05,0.11), glove, -0.004,-0.012,-0.16, 0, modelHands); part(box(0.08,0.08,0.45), sleeve, -0.12,-0.08,0.22, 0.2, hl);
 }
 const SWITCH_TIME = 0.5;
-const KIDLE = {p:[0.2,-0.2,-0.38], r:[0.18,0.35,-0.12]}, KHIDE = {p:[0.25,-0.48,-0.3], r:[0.3,0.9,-0.6]};
-const KSWING = [[0.18, [0.3,-0.08,-0.3], [0.1,1.05,-0.7]], [0.45, [-0.2,-0.17,-0.44], [-0.25,-0.85,0.15]], [0.62, [-0.16,-0.2,-0.4], [-0.2,-0.7,0.1]]];
+const KIDLE = {p:[0.165,-0.165,-0.4], r:[-0.12,0.15,0.22]}, KHIDE = {p:[0.24,-0.5,-0.36], r:[0.5,0.2,-0.3]};
+const KSWING = [[0.2, [0.3,-0.1,-0.37], [0.15,0.35,-0.45]], [0.45, [-0.14,-0.2,-0.44], [-0.95,-0.2,1.35]], [0.62, [-0.1,-0.23,-0.42], [-0.8,-0.15,1.15]]];
 function knifePose(p, idle){
   const keys = [[0, idle.p, idle.r], ...KSWING, [1, idle.p, idle.r]];
   for(let i=0;i<keys.length-1;i++){
