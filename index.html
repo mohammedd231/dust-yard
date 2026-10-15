@@ -140,6 +140,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 .keys{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:4px 0 0;font-size:12px}
 .keys dt{color:var(--brass);font-weight:600}
 .keys dd{margin:0;color:var(--muted)}
+.credit{margin:0;font-size:10.5px;color:var(--muted);opacity:.75}
 .note{margin:0;color:var(--danger);font-size:12px}
 @media (prefers-reduced-motion:reduce){.health .bar i{transition:none}}
 @media (max-width:600px){
@@ -164,7 +165,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
   <div class="vign" id="vign"></div>
   <div class="banner" id="banner"><b id="bannerT"></b><span id="bannerS"></span></div>
   <div class="health" id="health"><div class="lbl">Health</div><div class="hpnum" id="hpNum">100</div><div class="bar"><i id="hpBar"></i></div></div>
-  <div class="ammo"><div class="lbl" id="wpnLbl">M4 · 5.56×45 · Auto</div><div><span class="mag" id="mag">30</span><span class="res" id="res">/ 90</span></div><div class="reload" id="reloadHint" hidden>Press R to reload</div><div class="slots"><span id="slot1">1 Knife</span><span id="slot2" class="on">2 M4</span></div></div>
+  <div class="ammo"><div class="lbl" id="wpnLbl">AK-74U · 5.45×39 · Auto</div><div><span class="mag" id="mag">30</span><span class="res" id="res">/ 90</span></div><div class="reload" id="reloadHint" hidden>Press R to reload</div><div class="slots"><span id="slot1">1 Knife</span><span id="slot2" class="on">2 AK-74U</span></div></div>
   <div class="dead" id="dead" hidden><div class="lbl">Killed by</div><div class="who" id="deadWho"></div><div class="sub" id="deadSub"></div></div>
   <div class="protect" id="protect" hidden>Spawn protection</div>
   <div class="board" id="board" hidden>
@@ -205,11 +206,13 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
       <dt>Mouse</dt><dd>Aim · left click fires, right click aims down the iron sights</dd>
       <dt>1 · 2</dt><dd>Knife · rifle (Q or mouse wheel also switches)</dd>
       <dt>R</dt><dd>Reload (30-round magazine)</dd>
+      <dt>T</dt><dd>Inspect your rifle</dd>
       <dt>V</dt><dd>Quick knife slash · two hits kill, a stab in the back kills instantly</dd>
       <dt>Shift · C · Space</dt><dd>Sprint · crouch · jump</dd>
       <dt>Tab</dt><dd>Hold for scoreboard</dd>
       <dt>Esc</dt><dd>Pause, copy the invite link or leave</dd>
     </dl>
+    <p class="credit">AK-74U arms and animations by BURNER (Sketchfab), CC BY 4.0. Knife model by Pichuliru.</p>
     <p class="note" id="touchNote" hidden>Dust Yard needs a keyboard and mouse. Open it on a computer to play.</p>
   </div>
 </div>
@@ -621,7 +624,7 @@ function spatial(pos){
 }
 
 /* ---------------- First-person weapons ---------------- */
-const RIFLE_NAME = 'M4';
+const RIFLE_NAME = 'AK-74U';
 const steel = new THREE.MeshStandardMaterial({color:0x2a2c2e, roughness:0.42, metalness:0.75});
 const steelDark = new THREE.MeshStandardMaterial({color:0x17181a, roughness:0.5, metalness:0.7});
 const wood = new THREE.MeshStandardMaterial({color:0x8a4520, roughness:0.55, metalness:0.05});
@@ -1143,7 +1146,25 @@ function currentSpread(){
   if(P.crouch) s *= 0.65;
   return s + P.bloom;
 }
+let ARMS = null;   // animated first-person arms + AK-74U (models/arms.glb)
+const _qa = new THREE.Quaternion(), _qe = new THREE.Quaternion(), _eu = new THREE.Euler(), _m4 = new THREE.Matrix4();
+const _va = new V3(), _vb = new V3(), _vc = new V3(), _negZ = new V3(0,0,-1);
+function armsPlay(name, fade){
+  if(!ARMS) return; const a = ARMS.act[name]; if(!a) return;
+  fade = fade == null ? 0.12 : fade;
+  const cur = ARMS.cur;
+  a.reset(); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.setEffectiveTimeScale(1); a.setEffectiveWeight(1);
+  a.fadeIn(fade).play();
+  if(cur && cur !== a) cur.fadeOut(fade);
+  if(ARMS.act.IDLE.getEffectiveWeight() > 0) ARMS.act.IDLE.fadeOut(fade);
+  ARMS.cur = a;
+}
+function armsToIdle(fade){
+  if(!ARMS || !ARMS.cur) return;
+  ARMS.cur.fadeOut(fade); ARMS.act.IDLE.reset().fadeIn(fade).play(); ARMS.cur = null;
+}
 function muzzleWorld(){
+  if(ARMS && P.weapon === 2){ ARMS.muzzle.getWorldPosition(_vc); return camera.localToWorld(_vc.clone()); }
   const local = new V3(0.13,-0.14,-0.85).lerp(new V3(0,-0.06,-0.8), P.ads);
   return camera.localToWorld(local);
 }
@@ -1196,6 +1217,7 @@ function fire(t){
   P.punch += 0.012*(1 - P.ads*0.5); P.punchYaw += rand(-0.004,0.004);
   P.bloom = Math.min(0.05, P.bloom + 0.006*(1-P.ads*0.6));
   P.kick = 1;
+  if(ARMS && P.ads < 0.5) armsPlay('SHOOT', 0.03);
   flash.visible = true; flash.rotation.z = Math.random()*Math.PI; flash.scale.setScalar(rand(0.8,1.3)); flashTimer = 0.035;
   flashLight.intensity = 2.4; wFlashLight.intensity = 3;
   shotSound(0, 0);
@@ -1272,7 +1294,18 @@ function drawSound(w){
 }
 function startReload(){
   if(P.reload > 0 || P.mag >= MAG || P.reserve <= 0 || !P.alive || P.weapon !== 2 || P.switchT > 0) return;
-  P.reloadDur = P.mag > 0 ? 2.15 : 2.6; P.reload = P.reloadDur; P.sprint = false;
+  P.sprint = false;
+  if(ARMS){
+    const nm = P.mag > 0 ? 'RELOAD1' : 'RELOAD2';
+    P.reloadDur = ARMS.act[nm].getClip().duration; P.reload = P.reloadDur;
+    armsPlay(nm, 0.12);
+    const d = P.reloadDur;
+    click(900,0.4,0.06,d*0.22); click(700,0.45,0.07,d*0.25);
+    click(1100,0.5,0.06,d*0.55); click(1500,0.4,0.05,d*0.58);
+    if(P.mag === 0){ click(2000,0.45,0.05,d*0.8); click(1300,0.5,0.06,d*0.86); }
+    return;
+  }
+  P.reloadDur = P.mag > 0 ? 2.15 : 2.6; P.reload = P.reloadDur;
   click(900,0.4,0.06,0.35); click(700,0.45,0.07,0.38);
   click(1100,0.5,0.06,1.25); click(1500,0.4,0.05,1.3);
   if(P.mag === 0){ click(2000,0.45,0.05,1.85); click(1300,0.5,0.06,2.0); }
@@ -1304,7 +1337,7 @@ function respawn(){
   const p = pickSpawn(enemies, P.pos);
   P.pos.copy(p); P.vel.set(0,0,0); P.hp = 100; P.alive = true; P.mag = MAG; P.reserve = RESERVE; P.reload = 0;
   P.yaw = Math.atan2(p.x, p.z); P.pitch = 0; P.punch = P.punchYaw = 0; P.bloom = 0; P.crouch = false; P.h = 1.8; P.eye = 1.62;
-  P.protectUntil = t + 1.5; P.lastDmg = -9; P.weapon = P.nextWeapon = 2; P.switchT = 0; P.melee = 0;
+  P.protectUntil = t + 1.5; P.lastDmg = -9; P.weapon = P.nextWeapon = 2; P.switchT = 0; P.melee = 0; armsPlay('DRAW', 0.02);
   netDirty = true;
 }
 
@@ -1353,7 +1386,7 @@ function updateHUD(dt, t){
   const kn = P.weapon === 1;
   $('mag').textContent = kn ? '—' : P.mag; $('mag').classList.toggle('low', !kn && P.mag <= 7);
   $('res').textContent = kn ? '' : '/ ' + P.reserve;
-  $('wpnLbl').textContent = kn ? 'KA-BAR · Combat knife' : RIFLE_NAME + ' · 5.56×45 · Auto';
+  $('wpnLbl').textContent = kn ? 'KA-BAR · Combat knife' : RIFLE_NAME + ' · 5.45×39 · Auto';
   $('slot1').classList.toggle('on', P.nextWeapon === 1); $('slot2').classList.toggle('on', P.nextWeapon === 2);
   $('reloadHint').hidden = kn || !(P.alive && P.reload <= 0 && P.mag <= 7 && P.reserve > 0);
   if(P.reload > 0){ $('reloadHint').hidden = false; $('reloadHint').textContent = 'Reloading…'; } else $('reloadHint').textContent = 'Press R to reload';
@@ -1537,7 +1570,7 @@ window.addEventListener('mousemove', e => {
 window.addEventListener('keydown', e => {
   if(e.code === 'Tab' && deployed && !paused){ e.preventDefault(); $('board').hidden = false; hudTimer = 0; return; }
   if(!deployed || paused) return;
-  if(['Space','KeyV','KeyF','KeyW','KeyA','KeyS','KeyD','KeyC','KeyR','ShiftLeft','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+  if(['Space','KeyV','KeyF','KeyT','KeyW','KeyA','KeyS','KeyD','KeyC','KeyR','ShiftLeft','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
   if(e.code === 'Escape' && lockFailed){ pause(); return; }
   keys[e.code] = true;
   if(e.repeat) return;
@@ -1546,6 +1579,7 @@ window.addEventListener('keydown', e => {
   if(e.code === 'Digit1' || e.code === 'Numpad1') switchWeapon(1);
   if(e.code === 'Digit2' || e.code === 'Numpad2') switchWeapon(2);
   if(e.code === 'KeyQ') switchWeapon(P.nextWeapon === 1 ? 2 : 1);
+  if(e.code === 'KeyT' && ARMS && P.alive && P.weapon === 2 && P.switchT <= 0 && P.reload <= 0 && !firing && P.ads < 0.1 && !ARMS.cur) armsPlay('INSPEC', 0.2);
   if(e.code === 'Space' && P.grounded && P.alive){ P.vel.y = P.crouch ? 4.5 : 6.2; footstep(0.35); }
   if(e.code === 'KeyC') P.crouchToggle = !P.crouchToggle;
 });
@@ -1575,7 +1609,6 @@ function prepModel(root){
 }
 function eachAvatar(fn){ for(const r of remotes.values()) fn(r.av); for(const b of bots) if(b.av) fn(b.av); }
 function attachModels(av){
-  if(MODELS.rifle && !av.rifle){ av.rifle = MODELS.rifle.clone(); av.rifle.position.set(0.06,-0.13,-0.42); av.arms.add(av.rifle); }
   if(MODELS.knife && !av.knife){ av.knife = MODELS.knife.clone(); av.knife.position.set(0.2,-0.12,-0.36); av.arms.add(av.knife); }
   setAvatarWeapon(av, av.wp || 2);
 }
@@ -1593,10 +1626,31 @@ function loadModels(){
     MODELS.rifle = m;
     rifleHolder.add(m.clone());
     procGun.visible = false; modelHands.visible = true;
-    HIP.set(0.078,-0.072,-0.34); ADS.set(-0.001,-0.0707,-0.27); VM_FOV_HIP = 60; VM_FOV_ADS = 34;
+    HIP.set(0.078,-0.072,-0.34); ADS.set(-0.001,-0.0707,-0.27); if(!ARMS){ VM_FOV_HIP = 60; VM_FOV_ADS = 34; }
     flash.position.set(0,0.016,-0.37);
     eachAvatar(attachModels);
   }, undefined, () => {});
+  loader.load('models/arms.glb', g => {
+    const root = g.scene;
+    root.traverse(o => { if(o.isMesh){ o.frustumCulled = false; o.castShadow = false; o.receiveShadow = false; } });
+    const mixer = new THREE.AnimationMixer(root);
+    const act = {}; g.animations.forEach(c => { act[c.name] = mixer.clipAction(c); });
+    if(!act.IDLE) return;
+    act.IDLE.play(); mixer.update(0); root.updateMatrixWorld(true);
+    const bone = root.getObjectByName('Bone_043');
+    if(!bone) return;
+    // Points on the rifle measured from the model (idle pose): muzzle, rear sight notch, front sight post.
+    const cx = 0.0675;
+    const mk = (x, y, z) => { const o = new THREE.Object3D(); o.position.copy(bone.worldToLocal(new V3(x, y, z))); bone.add(o); return o; };
+    const muzzle = mk(cx, 1.5313, -0.556), rear = mk(cx, 1.5783, -0.275), front = mk(cx, 1.5783, -0.485);
+    const vm = new THREE.Group(); vm.add(root); vm.visible = false; wScene.add(vm);
+    const fl = flash.clone(); fl.visible = false; wScene.add(fl);
+    ARMS = {root, mixer, act, cur:null, vm, muzzle, rear, front, flash:fl,
+            hipT: new V3(0, -1.588, -0.03), eye: 0.25};
+    mixer.addEventListener('finished', e => { if(ARMS.cur && e.action === ARMS.cur) armsToIdle(0.15); });
+    VM_FOV_HIP = 62; VM_FOV_ADS = 46;
+    if(deployed && P.weapon === 2) armsPlay('DRAW', 0.02);
+  }, undefined, err => console.warn('Arms model failed to load; using the basic rifle.', err));
   loader.load('models/knife.glb', g => {
     const m = prepModel(g.scene);
     const inner = new THREE.Group(); inner.rotation.x = -Math.PI/2; inner.add(m);
@@ -1696,7 +1750,7 @@ function update(dt, t){
   if(P.switchT > 0){
     P.switchT -= dt;
     const h = SWITCH_TIME/2;
-    if(P.switchT <= h && P.weapon !== P.nextWeapon){ P.weapon = P.nextWeapon; drawSound(P.weapon); netDirty = true; }
+    if(P.switchT <= h && P.weapon !== P.nextWeapon){ P.weapon = P.nextWeapon; drawSound(P.weapon); netDirty = true; if(P.weapon === 2) armsPlay('DRAW', 0.02); }
     drop = P.switchT > h ? 1 - (P.switchT - h)/h : Math.max(0, P.switchT)/h;
     if(P.switchT <= 0) P.switchT = 0;
   }
@@ -1733,6 +1787,36 @@ function update(dt, t){
     knife.rotation.set(kp.r[0] - drop*0.7 - sk*0.25, kp.r[1] + sk*0.3, kp.r[2]);
   } else knife.visible = false;
   gunRoot.rotation.set(rx, ry, rz);
+  if(ARMS){
+    gunRoot.visible = false;
+    const show = !knifeOut && P.alive;
+    ARMS.vm.visible = show;
+    if(ARMS.cur && ARMS.cur.getClip().name === 'INSPEC' && (adsHeld || firing)) armsToIdle(0.15);
+    ARMS.mixer.update(dt);
+    // Live sight line in model space -> rotation/translation that puts it on the screen centre when aiming
+    ARMS.root.updateMatrixWorld(true);
+    _m4.copy(ARMS.root.matrixWorld).invert();
+    const rearM = ARMS.rear.getWorldPosition(_va).applyMatrix4(_m4);
+    const frontM = ARMS.front.getWorldPosition(_vb).applyMatrix4(_m4);
+    const dir = frontM.clone().sub(rearM).normalize();
+    _qa.setFromUnitVectors(dir, _negZ);
+    const tAds = new V3(0, 0, -ARMS.eye).sub(rearM.clone().applyQuaternion(_qa));
+    const ads = P.ads;
+    const q = new THREE.Quaternion().slerp(_qa, ads);
+    const T = ARMS.hipT.clone().lerp(tAds, ads);
+    // Procedural extras on top of the animation: bob, sway, recoil kick, sprint, weapon switch, quick knife
+    const dropVm = (P.switchT > 0 && P.weapon === 2 && P.switchT <= SWITCH_TIME/2) ? 0 : drop;
+    let ax = P.kick*0.045*(1 - ads*0.6) - sk*0.28 - dropVm*0.9, ay = sk*0.5, az = 0;
+    const sw = 1 - ads*0.8;
+    let ox = bx + P.swayX*sw - sk*0.04, oy = by + P.swayY*sw - sk*0.04 - dropVm*0.3, oz = P.kick*0.028*(1 - ads*0.4);
+    if(P.melee > 0 && !knifeOut){ const d = Math.sin(clamp(1 - P.melee/MELEE_TIME, 0, 1)*Math.PI); oy -= d*0.3; ax -= d*0.6; }
+    _qe.setFromEuler(_eu.set(ax, ay, az));
+    ARMS.vm.quaternion.copy(_qe).multiply(q);
+    ARMS.vm.position.copy(T.applyQuaternion(_qe)).add(_vc.set(ox, oy, oz));
+    // Muzzle flash follows the real muzzle
+    ARMS.flash.visible = flash.visible && show;
+    if(ARMS.flash.visible){ ARMS.vm.updateMatrixWorld(true); ARMS.muzzle.getWorldPosition(ARMS.flash.position); ARMS.flash.rotation.z = flash.rotation.z; ARMS.flash.scale.copy(flash.scale).multiplyScalar(0.8); }
+  }
 
   // Sky follows camera; shadow box follows player
   sky.position.copy(camera.position);
