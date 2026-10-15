@@ -1177,7 +1177,7 @@ function setupKnifeArms(){
   const pivot = new THREE.Group(); root.position.copy(hc).negate(); pivot.add(root);
   const vm = new THREE.Group(); vm.add(pivot); vm.visible = false; wScene.add(vm);
   KARMS = {root, mixer, hand, lsh, fingers, pivot, vm, hc, knife: kn,
-           curlAxis: new V3(0, 0, 1), curl: [0.9, 0.9, 0.6], indexExtra: 0.3,
+           curlAxis: new V3(0, 0, 1), curl: [0.9, 0.9, 0.6], fingerMul: [1.3, 1, 0, 0],
            off: new V3(0.02, 0.03, -0.21), rot: new THREE.Euler(0.05, -0.35, 0.3)};
 }
 
@@ -1829,7 +1829,8 @@ function update(dt, t){
     if(showK){
       KARMS.mixer.update(dt);
       if(KARMS.lsh) KARMS.lsh.scale.setScalar(0.001);
-      KARMS.fingers.forEach((chain, fi) => chain.forEach((b, j) => { if(b){ _qa.setFromAxisAngle(KARMS.curlAxis, KARMS.curl[j] * (fi === 0 ? 1 + KARMS.indexExtra : 1) * (j === 0 && fi === 0 ? 1 : 1)); b.quaternion.multiply(_qa); } }));
+      KARMS.fingers.forEach((chain, fi) => chain.forEach((b, j) => { if(b){ _qa.setFromAxisAngle(KARMS.curlAxis, KARMS.curl[j] * KARMS.fingerMul[fi]); b.quaternion.multiply(_qa); } }));
+      if(KARMS.post) KARMS.post();
       // Same pose maths as the old knife: idle + slash keyframes, applied around the hand
       const idleP = knifeOut ? KIDLE : KHIDE;
       const kp = (P.melee > 0) ? knifePose(1 - P.melee/MELEE_TIME, idleP) : {p:idleP.p.slice(), r:idleP.r.slice()};
