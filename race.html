@@ -179,8 +179,8 @@ const body = new THREE.Group(); car.add(body);
 const shadowBlob = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 5.8), new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.45, depthWrite:false}));
 shadowBlob.rotation.x = -Math.PI/2; shadowBlob.renderOrder = 1;
 const CAMS = [
-  {name:'Cockpit', pos:new V3(0, 0.88, -0.25), look:new V3(0, 0.78, 30), fov:72},
-  {name:'T-cam',   pos:new V3(0, 1.32, -0.75), look:new V3(0, 0.55, 22), fov:68},
+  {name:'Cockpit', pos:new V3(0, 0.78, 0.74), look:new V3(0, 0.68, 30), fov:72},
+  {name:'T-cam',   pos:new V3(0, 1.28, -0.35), look:new V3(0, 0.6, 22), fov:68},
   {name:'Chase',   pos:new V3(0, 2.4, -7.6),   look:new V3(0, 0.9, 6),   fov:64}
 ];
 let camMode = store.get('cam', 1);
@@ -205,7 +205,9 @@ loader.load('models/f1/car.glb', g => {
   m.position.set(-c.x, -bb2.min.y, -c.z);
   if(size.x > size.z) m.rotation.y = Math.PI/2;   // long axis along +Z
   m.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
-  body.add(m); progress();
+  // the model's nose points to -Z; turn it around so the nose leads (+Z)
+  const wrap = new THREE.Group(); wrap.rotation.y = Math.PI; wrap.add(m);
+  body.add(wrap); progress();
 }, undefined, () => fail('car'));
 
 /* ---------- state ---------- */
@@ -282,7 +284,7 @@ function step(dt){
   let thr = (keys.KeyW || keys.ArrowUp) ? 1 : 0, brk = (keys.KeyS || keys.ArrowDown) ? 1 : 0;
   let st = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0);
   if(gp){ thr = Math.max(thr, gp.buttons[7] ? gp.buttons[7].value : 0); brk = Math.max(brk, gp.buttons[6] ? gp.buttons[6].value : 0); const ax = gp.axes[0] || 0; if(Math.abs(ax) > 0.08) st = -ax; }
-  if(!S.running){ thr = 0; brk = 1; }
+  if(!S.running){ thr = 0; brk = 0; S.vx = S.vz = 0; }
   const fx = Math.sin(S.h), fz = Math.cos(S.h), rx = Math.cos(S.h), rz = -Math.sin(S.h);
   let vf = S.vx*fx + S.vz*fz, vl = S.vx*rx + S.vz*rz;
   const off = distAt(S.x, S.z), onGrass = off > 2, gravel = off > 6;
