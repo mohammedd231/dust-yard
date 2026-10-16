@@ -196,8 +196,71 @@ loader.load('models/f1/track.glb', g => {
   g.scene.traverse(o => { if(o.isMesh){ o.receiveShadow = true; o.castShadow = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { if(m.map) m.map.anisotropy = renderer.capabilities.getMaxAnisotropy(); if(m.transparent || m.alphaTest) { m.alphaTest = Math.max(m.alphaTest || 0, 0.4); m.transparent = false; } }); } });
   scene.add(g.scene); progress();
 }, undefined, () => fail('circuit'));
+/* ---------- wheels ----------
+   The model has no separate wheel objects (tyres share meshes with the bodywork),
+   so cut the wheel triangles out of each mesh and hang them on their own pivots.
+   Model space: X across, Y up, nose toward -Z. */
+const WHEELS = [];       // {steer, spin, front}
+let wheelR = 0.36;
+function splitWheels(root){
+  const HUBS = [
+    {x: 1, z:-49.14, cx:24.7, front:true, minX:18.25}, {x:-1, z:-49.14, cx:24.7, front:true, minX:18.25},
+    {x: 1, z: 73.16, cx:23.0, front:false, minX:15.5},  {x:-1, z: 73.16, cx:23.0, front:false, minX:15.5}
+  ];
+  const HUB_Y = 12.1, R = 11.9;
+  const pivots = HUBS.map(hb => {
+    const steer = new THREE.Group(); steer.position.set(hb.x*hb.cx, HUB_Y, hb.z);
+    const spin = new THREE.Group(); steer.add(spin); root.add(steer);
+    WHEELS.push({steer, spin, front:hb.front}); return {hb, steer, spin};
+  });
+  const meshes = []; root.traverse(o => { if(o.isMesh && o.geometry.index) meshes.push(o); });
+  const v = new V3();
+  meshes.forEach(mesh => {
+    const geo = mesh.geometry, pa = geo.attributes.position, idx = geo.index.array;
+    const arr = pa.array;
+    const norm = !pa.normalized ? 1 : arr instanceof Int16Array ? 1/32767 : arr instanceof Uint16Array ? 1/65535 : arr instanceof Int8Array ? 1/127 : arr instanceof Uint8Array ? 1/255 : 1;
+    const mw = mesh.matrixWorld, n = pa.count, isz = pa.itemSize;
+    // which wheel (0-3) each vertex belongs to, or -1
+    const tag = new Int8Array(n);
+    for(let i=0;i<n;i++){
+      let x, y, z;
+      if(pa.isInterleavedBufferAttribute){ x = pa.getX(i)*norm; y = pa.getY(i)*norm; z = pa.getZ(i)*norm; }
+      else { x = arr[i*isz]*norm; y = arr[i*isz+1]*norm; z = arr[i*isz+2]*norm; }
+      v.set(x, y, z).applyMatrix4(mw);
+      tag[i] = -1;
+      const ax = Math.abs(v.x);
+      for(let w=0; w<4; w++){
+        const hb = HUBS[w];
+        if(Math.sign(v.x) !== hb.x || ax < hb.minX) continue;
+        if(Math.hypot(v.y - HUB_Y, v.z - hb.z) < R){ tag[i] = w; break; }
+      }
+    }
+    const keep = [], parts = [[],[],[],[]];
+    for(let t=0; t<idx.length; t+=3){
+      const a = tag[idx[t]], b = tag[idx[t+1]], c = tag[idx[t+2]];
+      if(a >= 0 && a === b && a === c) parts[a].push(idx[t], idx[t+1], idx[t+2]);
+      else keep.push(idx[t], idx[t+1], idx[t+2]);
+    }
+    if(keep.length === idx.length) return;
+    const IA = n > 65535 ? Uint32Array : Uint16Array;
+    parts.forEach((tris, w) => {
+      if(!tris.length) return;
+      const g2 = new THREE.BufferGeometry();
+      for(const k in geo.attributes) g2.setAttribute(k, geo.attributes[k]);
+      g2.setIndex(new THREE.BufferAttribute(new IA(tris), 1));
+      const wm = new THREE.Mesh(g2, mesh.material);
+      wm.matrixAutoUpdate = false;
+      // mesh world matrix, re-expressed relative to the wheel hub
+      const p = pivots[w];
+      wm.matrix.copy(mw).premultiply(new THREE.Matrix4().makeTranslation(-p.steer.position.x, -HUB_Y, -p.hb.z));
+      p.spin.add(wm);
+    });
+    geo.setIndex(new THREE.BufferAttribute(new IA(keep), 1));
+  });
+}
 loader.load('models/f1/car.glb', g => {
   const m = g.scene; m.updateMatrixWorld(true);
+  splitWheels(m);
   const bb = new THREE.Box3().setFromObject(m), size = bb.getSize(new V3());
   const s = 5.63 / Math.max(size.x, size.z);
   m.scale.setScalar(s); m.updateMatrixWorld(true);
@@ -205,6 +268,7 @@ loader.load('models/f1/car.glb', g => {
   m.position.set(-c.x, -bb2.min.y, -c.z);
   if(size.x > size.z) m.rotation.y = Math.PI/2;   // long axis along +Z
   m.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
+  wheelR = 11.4 * s;
   // the model's nose points to -Z; turn it around so the nose leads (+Z)
   const wrap = new THREE.Group(); wrap.rotation.y = Math.PI; wrap.add(m);
   body.add(wrap); progress();
@@ -348,6 +412,9 @@ function updateCar(dt){
   car.rotation.set(0, S.h, 0);
   const vf = S.vx*fx + S.vz*fz;
   body.rotation.set(S.pitch + (S.brake ? 0.012 : 0) - (S.throttle ? 0.006 : 0), 0, S.roll - S.steer*Math.min(1, Math.abs(vf)/40)*0.03);
+  // wheels: roll with speed (nose is model -Z, so forward roll is -X rotation) and steer the fronts
+  const roll = vf*dt / wheelR;
+  WHEELS.forEach(w => { w.spin.rotation.x -= roll; if(w.front) w.steer.rotation.y = S.steer; });
   if(bumpT > 0){ bumpT -= dt; body.position.y = Math.sin(bumpT*80)*0.03; } else body.position.y = 0;
   shadowBlob.position.set(S.x, S.y + 0.03, S.z); shadowBlob.rotation.z = -S.h;
   sun.position.set(S.x + 120, S.y + 260, S.z + 80); sun.target.position.set(S.x, S.y, S.z);
@@ -444,7 +511,7 @@ function frame(){
 }
 setCam(camMode);
 requestAnimationFrame(frame);
-window.__race = {S, CAMS, setCam, placeOnTrack, get CL(){ return CL; }};
+window.__race = {S, CAMS, WHEELS, setCam, placeOnTrack, get CL(){ return CL; }};
 })();
 </script>
 </body>
