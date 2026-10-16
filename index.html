@@ -114,6 +114,8 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 .btn.primary{background:var(--brass);color:#1a1307;border-color:var(--brass);font-weight:800;font-size:20px;padding:8px 26px}
 .btn.primary:hover{filter:brightness(1.08)}
 .btn.ghost{background:transparent}
+.btn.f1{align-self:flex-start;text-decoration:none;border-color:#ff3b2f;color:#fff;background:rgba(255,59,47,.18)}
+.btn.f1:hover{background:rgba(255,59,47,.3)}
 .btn.sm{font-size:16px;padding:6px 18px}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .btn:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
@@ -185,6 +187,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
       <div class="row"><input id="nick" maxlength="16" autocomplete="off" spellcheck="false"><button id="findBtn" class="btn primary" type="button">Find a match</button></div>
       <p class="status" id="menuStatus">Connecting to the match server…</p>
       <button id="soloBtn" class="btn ghost" type="button" hidden>Practise against bots</button>
+      <a class="btn f1" href="race">F1 Race · Shanghai</a>
     </section>
     <section class="view" id="viewSearch" hidden>
       <div class="eyebrow">Matchmaking · up to 8 players per match</div>

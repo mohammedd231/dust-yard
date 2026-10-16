@@ -12,3 +12,8 @@ WASD move · mouse aim · left click fire/slash · right click aim down sights �
 ## Credits
 - AK-74U first-person arms and animations: "AK74U | FREE ANIMATION" by BURNER (https://sketchfab.com/Alexander_Ovelar), CC BY 4.0. Textures recompressed and unused data removed for the web.
 - Knife and fallback rifle models by Pichuliru (Sketchfab).
+- F1 car: "Visa Cash App Red Bull Racing VCARB01" by bachlamanh406 (Sketchfab), CC BY 4.0. Simplified for the web.
+- F1 track: "Shanghai International Circuit 2018 layout" by Dave Love (Sketchfab), CC BY 4.0. Simplified for the web.
+
+## F1 race (`/race`)
+W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam / chase) · R reset to track · Esc pause. Gamepad triggers + left stick work too.
