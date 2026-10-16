@@ -217,7 +217,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
       <dt>T</dt><dd>Inspect your rifle</dd>
       <dt>V</dt><dd>Quick knife slash · two hits kill, a stab in the back kills instantly</dd>
       <dt>Shift · C · Space</dt><dd>Sprint · crouch · jump</dd>
-      <dt>E</dt><dd>Get in / out of the boat on the beach</dd>
+      <dt>E</dt><dd>Get in / out of the rowing boat at the jetty</dd>
       <dt>Tab</dt><dd>Hold for scoreboard</dd>
       <dt>Esc</dt><dd>Pause, copy the invite link or leave</dd>
     </dl>
@@ -405,10 +405,10 @@ function barrel(x, z){
   colliders.push({min:new V3(x-0.3,0,z-0.3), max:new V3(x+0.3,0.92,z+0.3)});
 }
 
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(258, 400), new THREE.MeshStandardMaterial({map:TEX.sand, roughness:1}));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(246, 400), new THREE.MeshStandardMaterial({map:TEX.sand, roughness:1}));
 ground.material.map = TEX.sand.clone(); ground.material.map.needsUpdate = true;
-ground.material.map.repeat.set(258/7, 400/7);
-ground.position.x = -71; ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
+ground.material.map.repeat.set(246/7, 400/7);
+ground.position.x = -77; ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
 
 // Perimeter
 B(0,-45.5,92,1,6,'plaster'); B(0,45.5,92,1,6,'plaster'); B(-45.5,0,1,90,6,'plaster');
@@ -438,19 +438,39 @@ crate(-6,6,0.9); crate(22,14,0.9); crate(-22,-14,0.9); crate(30,0,0.9);
 [[-17,-6],[-16.3,-5.4],[17,6],[5,20],[-5,-20],[24,-20],[-26,18],[40,20],[-40,-20]].forEach(([x,z])=>barrel(x,z));
 
 /* ---------------- Sea, beach, island and the boat (east side) ----------------
-   The east wall has a gap that opens onto a beach. Past the waterline is open sea with
-   rolling waves, a small sandy island with cover, and a wooden boat you can drive (E). */
-const SHORE_X = 60.5;                 // furthest east you can walk on the beach
-const WATER_Y = -0.45;                // calm water level (ground is y = 0)
+   The east wall has a gate that opens onto a beach with a curving shoreline. Past it is open
+   sea with rolling waves that wash up the sand, a small island with cover, and a wooden
+   rowing boat you paddle (E to get in). */
+const WATER_Y = -0.45;                // calm water level (dry ground is y = 0)
 const ISLE = {x:118, z:14, r:13};     // flat walkable top of the island
-const WAVES = [                       // amplitude, wavelength, direction (rad), shared by GLSL and JS
+const JETTY = {x0:55.5, x1:66.5, z:-3.2, w:1.6};
+const WAVES = [                       // amplitude, wavelength, direction (rad); same sums in GLSL and JS
   [0.20, 15.0, 3.40], [0.11, 7.5, 2.75], [0.05, 3.4, 4.10], [0.035, 2.1, 3.0]
 ].map(([a, l, d]) => { const k = 2*Math.PI/l; return {a, k, dx:Math.cos(d), dz:Math.sin(d), w:Math.sqrt(9.8*k)}; });
+// Calm waterline along the beach: a wandering curve instead of a straight edge
+function shoreX(z){ return 60 + 2.4*Math.sin(0.105*z + 0.6) + 1.2*Math.sin(0.27*z + 2.1) + 0.45*Math.sin(0.71*z + 0.3); }
+function beachH(x, z){
+  const d = x - shoreX(z);
+  if(d < -5) return 0;
+  if(d <= 0) return -0.45*Math.pow((d + 5)/5, 1.6);
+  return Math.max(-2.8, -0.45 - 0.17*d);
+}
+function isleH(x, z){ const r = Math.hypot(x - ISLE.x, z - ISLE.z); return r <= ISLE.r ? 0 : -Math.min(2.85, (r - ISLE.r)*0.22); }
+function groundAt(x, z){
+  if(x < 46) return 0;
+  return Math.max(beachH(x, z), isleH(x, z));
+}
 function shoreDamp(x, z){
-  // waves grow from the beach outward and calm down on the island's shallows
-  const s = clamp((x - 60)/22, 0.25, 1);
+  // waves grow from the beach outward and calm down over the island's shallows
+  const s = clamp((x - shoreX(z))/22, 0.15, 1);
   const di = Math.hypot(x - ISLE.x, z - ISLE.z);
   return s * clamp((di - 12)/14, 0.35, 1);
+}
+function swash(x, z, t){
+  // slow surges that run up the sand and slide back, arriving at different times along the beach
+  const d = x - shoreX(z);
+  const band = 1 - clamp((d + 1)/8, 0, 1);
+  return band * 0.14 * Math.sin(1.05*t - 0.55*d + 0.8*Math.sin(0.09*z + 0.4*t) + 0.6*Math.sin(0.23*z));
 }
 let seaTime = 0;
 function waveAt(x, z, out){
@@ -460,31 +480,39 @@ function waveAt(x, z, out){
     h += W.a*Math.sin(ph); const c = W.a*W.k*Math.cos(ph); gx += c*W.dx; gz += c*W.dz;
   }
   if(out){ out.gx = gx*s; out.gz = gz*s; }
-  return WATER_Y + h*s;
+  return WATER_Y + h*s + swash(x, z, seaTime);
 }
 function onLand(x, z){
-  if(x <= SHORE_X + 0.5) return true;
+  if(x < 46 || x <= shoreX(z)) return true;
   return Math.hypot(x - ISLE.x, z - ISLE.z) <= ISLE.r + 0.5;
 }
 function landClamp(p){
   const dx = p.x - ISLE.x, dz = p.z - ISLE.z, d = Math.hypot(dx, dz);
-  if(d < ISLE.r + 4){ const m = ISLE.r - PW; if(d > m){ p.x = ISLE.x + dx/d*m; p.z = ISLE.z + dz/d*m; } return; }
+  if(d < ISLE.r + 4){ const m = ISLE.r + 1.2 - PW; if(d > m){ p.x = ISLE.x + dx/d*m; p.z = ISLE.z + dz/d*m; } return; }
   const lim = 44.9 - PW;
-  p.x = clamp(p.x, -lim, SHORE_X); p.z = clamp(p.z, -lim, lim);
+  p.z = clamp(p.z, -lim, lim);
+  // you can wade in to about knee depth, or walk out along the jetty
+  const onJetty = Math.abs(p.z - JETTY.z) < JETTY.w/2 - 0.05 && p.y > 0.05;
+  p.x = clamp(p.x, -lim, onJetty ? JETTY.x1 - PW : shoreX(p.z) + 2.6);
 }
 {
   const sandMat = new THREE.MeshStandardMaterial({map:TEX.sand.clone(), roughness:1});
   sandMat.map.needsUpdate = true; sandMat.map.repeat.set(4, 30);
-  const wetMat = new THREE.MeshStandardMaterial({map:TEX.sand.clone(), roughness:0.7, color:0x9c8a6a});
-  wetMat.map.needsUpdate = true; wetMat.map.repeat.set(6, 60);
-  // Beach slope from the dry sand into the water, then the sea floor
-  const slope = new THREE.PlaneGeometry(18, 420, 6, 1); slope.rotateX(-Math.PI/2);
-  const sp = slope.attributes.position;
-  for(let i=0;i<sp.count;i++){ const x = sp.getX(i) + 9; sp.setY(i, -Math.pow(x/18, 1.25)*2.8); }
-  slope.computeVertexNormals();
-  const slopeM = new THREE.Mesh(slope, wetMat); slopeM.position.x = 58; slopeM.receiveShadow = true; scene.add(slopeM);
+  // Beach: one mesh following beachH, darker where the sand is wet
+  const bt = TEX.sand.clone(); bt.needsUpdate = true; bt.repeat.set(36.5/7, 460/7);
+  const beachMat = new THREE.MeshStandardMaterial({map:bt, roughness:0.95, vertexColors:true});
+  const bg = new THREE.PlaneGeometry(36.5, 460, 73, 460); bg.rotateX(-Math.PI/2);
+  const bp = bg.attributes.position, cols = new Float32Array(bp.count*3);
+  for(let i=0;i<bp.count;i++){
+    const x = bp.getX(i) + 45.5 + 18.25, z = bp.getZ(i);
+    bp.setX(i, x - 63.75); bp.setY(i, beachH(x, z));
+    const wet = clamp((x - shoreX(z) + 2.2)/2.2, 0, 1);
+    cols[i*3] = 1 - wet*0.3; cols[i*3+1] = 1 - wet*0.33; cols[i*3+2] = 1 - wet*0.38;
+  }
+  bg.setAttribute('color', new THREE.BufferAttribute(cols, 3)); bg.computeVertexNormals();
+  const beach = new THREE.Mesh(bg, beachMat); beach.position.x = 63.75; beach.receiveShadow = true; scene.add(beach);
   const bed = new THREE.Mesh(new THREE.PlaneGeometry(500, 600), new THREE.MeshStandardMaterial({color:0x4f6a5e, roughness:1}));
-  bed.rotation.x = -Math.PI/2; bed.position.set(76 + 250, -2.8, 0); scene.add(bed);
+  bed.rotation.x = -Math.PI/2; bed.position.set(82 + 250, -2.8, 0); scene.add(bed);
   // Island: a flat sandy top that shelves away under the water
   const prof = [[0,0.02],[ISLE.r,0.02],[ISLE.r+1.2,-0.25],[ISLE.r+3,-0.7],[ISLE.r+6,-1.5],[ISLE.r+10,-2.4],[ISLE.r+13,-2.85]].map(([r,y]) => new THREE.Vector2(r, y));
   const isle = new THREE.Mesh(new THREE.LatheGeometry(prof, 56), sandMat);
@@ -507,46 +535,63 @@ function landClamp(p){
     colliders.push({min:new V3(x-0.22,0,z-0.22), max:new V3(x+0.22,h*0.8,z+0.22)});
   }
   palm(ISLE.x-4, ISLE.z-3, 6.5, 0.6); palm(ISLE.x+5, ISLE.z+4, 7.2, 2.4); palm(ISLE.x+2, ISLE.z-8, 5.8, 4.0);
-  palm(55, -30, 6.2, 1.2); palm(56, 22, 6.8, 1.9); palm(54, 38, 5.6, 1.0);
+  palm(52, -30, 6.2, 1.2); palm(53, 22, 6.8, 1.9); palm(51, 38, 5.6, 1.0);
   // Cover on the island and the beach
   crate(ISLE.x-1, ISLE.z+1); crate(ISLE.x-0.05, ISLE.z+1); crate(ISLE.x-1, ISLE.z+1, 0.9);
   B(ISLE.x+6, ISLE.z-3, 0.7, 4, 1.1, 'sandbag'); B(ISLE.x-7, ISLE.z+5, 4, 0.7, 1.1, 'sandbag'); B(ISLE.x+1, ISLE.z+8.5, 3, 0.7, 1.1, 'sandbag');
-  B(52, -12, 0.7, 4, 1.1, 'sandbag'); B(52, 12, 0.7, 4, 1.1, 'sandbag'); crate(57, -20); crate(57.95, -20); crate(56, 31);
-  // Little wooden jetty next to the boat
+  B(50, -12, 0.7, 4, 1.1, 'sandbag'); B(50, 12, 0.7, 4, 1.1, 'sandbag'); crate(53, -20); crate(53.95, -20); crate(52, 31);
+  // Wooden jetty out to the boat (you can walk on it)
   const plankTex = canvasTex(256,(g,s)=>{ for(let i=0;i<8;i++){ g.fillStyle=`hsl(28,${30+rand(-6,6)}%,${30+rand(-5,5)}%)`; g.fillRect(0,i*s/8,s,s/8-3); g.fillStyle='rgba(20,12,6,.6)'; g.fillRect(0,i*s/8+s/8-3,s,3); } speckle(g,s,2500,false,0.3); speckle(g,s,900,true,0.12); });
+  plankTex.repeat.set(1, 6); plankTex.rotation = Math.PI/2;
   const plank = new THREE.MeshStandardMaterial({map:plankTex, roughness:0.9});
-  const jetty = new THREE.Mesh(new THREE.BoxGeometry(7, 0.18, 1.6), plank); jetty.position.set(62.5, 0.05, -3.2); jetty.castShadow = jetty.receiveShadow = true; scene.add(jetty);
-  for(const px of [59.5, 62, 64.5]) for(const pz of [-3.85, -2.55]){ const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), plank); post.position.set(px, -1.1, pz); scene.add(post); }
+  const jl = JETTY.x1 - JETTY.x0;
+  const jetty = new THREE.Mesh(new THREE.BoxGeometry(jl, 0.18, JETTY.w), plank); jetty.position.set((JETTY.x0 + JETTY.x1)/2, 0.05, JETTY.z); jetty.castShadow = jetty.receiveShadow = true; scene.add(jetty);
+  colliders.push({min:new V3(JETTY.x0, -0.6, JETTY.z - JETTY.w/2), max:new V3(JETTY.x1, 0.14, JETTY.z + JETTY.w/2)});
+  for(const px of [57.5, 60.5, 63.5, 66.2]) for(const pz of [JETTY.z - 0.65, JETTY.z + 0.65]){ const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.2, 6), plank); post.position.set(px, -1.4, pz); scene.add(post); }
 }
-// Water: one big plane, waves moved on the GPU with the same sums as waveAt()
+// Water: one big plane, moved on the GPU with the same sums as waveAt(); foam and colour come from the depth over the sand
 const waterU = { uTime:{value:0} };
 const waterMat = new THREE.MeshStandardMaterial({color:new THREE.Color(0x0c3a4a).convertSRGBToLinear(), roughness:0.07, metalness:0.0, transparent:true, opacity:0.93});
 waterMat.onBeforeCompile = sh => {
   sh.uniforms.uTime = waterU.uTime;
   const W = WAVES.map(w => `vec4(${w.a.toFixed(4)},${w.k.toFixed(4)},${w.w.toFixed(4)},0.0), vec2(${w.dx.toFixed(4)},${w.dz.toFixed(4)})`);
-  const fn = `
+  const IX = ISLE.x.toFixed(1), IZ = ISLE.z.toFixed(1), IR = ISLE.r.toFixed(1);
+  const common = `
     uniform float uTime; varying float vWaveH; varying vec3 vWP; varying vec3 vWN;
-    float shoreDamp(vec2 p){ float s = clamp((p.x-60.0)/22.0, 0.25, 1.0); float di = length(p - vec2(${ISLE.x.toFixed(1)}, ${ISLE.z.toFixed(1)})); return s*clamp((di-12.0)/14.0, 0.35, 1.0); }
+    float shoreX(float z){ return 60.0 + 2.4*sin(0.105*z + 0.6) + 1.2*sin(0.27*z + 2.1) + 0.45*sin(0.71*z + 0.3); }
+    float beachH(vec2 p){ float d = p.x - shoreX(p.y); if(d < -5.0) return 0.0; if(d <= 0.0) return -0.45*pow((d + 5.0)/5.0, 1.6); return max(-2.8, -0.45 - 0.17*d); }
+    float groundAt(vec2 p){ float r = length(p - vec2(${IX}, ${IZ})); float ih = r <= ${IR} ? 0.0 : -min(2.85, (r - ${IR})*0.22); return max(beachH(p), ih); }
+  `;
+  const vfn = common + `
+    float shoreDamp(vec2 p){ float s = clamp((p.x - shoreX(p.y))/22.0, 0.15, 1.0); float di = length(p - vec2(${IX}, ${IZ})); return s*clamp((di-12.0)/14.0, 0.35, 1.0); }
+    float swash(vec2 p){ float d = p.x - shoreX(p.y); float band = 1.0 - clamp((d + 1.0)/8.0, 0.0, 1.0);
+      return band*0.14*sin(1.05*uTime - 0.55*d + 0.8*sin(0.09*p.y + 0.4*uTime) + 0.6*sin(0.23*p.y)); }
     void wave(vec4 a, vec2 d, vec2 p, inout float h, inout vec2 g){ float ph = a.y*dot(p,d) - a.z*uTime; h += a.x*sin(ph); g += a.x*a.y*cos(ph)*d; }
     float waves(vec2 p, out vec2 g){ float h = 0.0; g = vec2(0.0);
       ${W.map(s => `wave(${s}, p, h, g);`).join(' ')}
-      float s = shoreDamp(p); g *= s; return h*s; }
+      float s = shoreDamp(p); g *= s; return h*s + swash(p); }
   `;
   sh.vertexShader = sh.vertexShader
-    .replace('#include <common>', '#include <common>\n' + fn)
+    .replace('#include <common>', '#include <common>\n' + vfn)
     .replace('#include <beginnormal_vertex>', `vec4 wpos0 = modelMatrix*vec4(position,1.0); vec2 wg; float wh = waves(wpos0.xz, wg); vec3 objectNormal = normalize(vec3(-wg.x, 1.0, -wg.y)); vWN = objectNormal;`)
     .replace('#include <begin_vertex>', `vec3 transformed = position; transformed.y += wh; vWaveH = wh; vWP = wpos0.xyz;`);
   sh.fragmentShader = sh.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform float uTime; varying float vWaveH; varying vec3 vWP; varying vec3 vWN;')
+    .replace('#include <common>', '#include <common>\n' + common)
     .replace('#include <color_fragment>', `#include <color_fragment>
-      float crest = smoothstep(0.24, 0.40, vWaveH);
-      float n = sin(vWP.x*1.7 + uTime*1.3)*sin(vWP.z*2.3 - uTime*0.9);
-      float shore = smoothstep(${(SHORE_X+2.2).toFixed(1)}, ${(SHORE_X+0.6).toFixed(1)}, vWP.x) * (0.55 + 0.45*n);
-      float isleD = length(vWP.xz - vec2(${ISLE.x.toFixed(1)}, ${ISLE.z.toFixed(1)}));
-      float isleFoam = smoothstep(${(ISLE.r+2.0).toFixed(1)}, ${(ISLE.r+1.2).toFixed(1)}, isleD) * (0.55 + 0.45*n);
-      float shallow = 1.0 - smoothstep(0.0, 9.0, vWP.x - ${SHORE_X.toFixed(1)});
+      float depth = ${WATER_Y.toFixed(2)} + vWaveH - groundAt(vWP.xz);
+      float n1 = sin(vWP.x*1.7 + uTime*1.3)*sin(vWP.z*2.3 - uTime*0.9);
+      float n2 = sin(vWP.x*3.1 - vWP.z*2.7 + uTime*1.7)*sin(vWP.z*4.3 + vWP.x*0.7);
+      float lace = 0.5 + 0.3*n1 + 0.2*n2;
+      // foam where the water runs thin over the sand, plus lines of foam rolling in toward the shore
+      float edge = 1.0 - smoothstep(0.0, 0.13, depth);
+      float d = vWP.x - shoreX(vWP.z);
+      float rolls = smoothstep(0.8, 1.0, sin(d*1.6 + uTime*1.05 + 0.8*sin(0.09*vWP.z + 0.4*uTime) + 0.6*sin(0.23*vWP.z))) * (1.0 - smoothstep(0.3, 1.6, depth));
+      float crest = smoothstep(0.24, 0.40, vWaveH - ${WATER_Y.toFixed(2)} * 0.0) * step(1.5, depth);
+      float foam = clamp(edge*(0.2 + 0.7*lace*lace) + rolls*lace*lace*0.7 + crest*0.25, 0.0, 0.85);
+      float shallow = 1.0 - smoothstep(0.0, 2.2, depth);
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.02,0.17,0.17), shallow*0.75);
-      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.75,0.83,0.85), clamp(crest*0.25 + shore*0.45 + isleFoam*0.3, 0.0, 0.8));`)
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.75,0.83,0.85), foam);
+      diffuseColor.a = mix(0.25, 0.93, smoothstep(0.0, 1.1, depth)) + foam*0.4;`)
     .replace('#include <output_fragment>', `
       vec3 vdir = normalize(cameraPosition - vWP);
       float fres = pow(1.0 - clamp(dot(normalize(vWN), vdir), 0.0, 1.0), 4.0);
@@ -555,15 +600,17 @@ waterMat.onBeforeCompile = sh => {
       outgoingLight = mix(outgoingLight, skyc, clamp(0.05 + fres*0.7, 0.0, 0.8));
       #include <output_fragment>`);
 };
-const waterGeo = new THREE.PlaneGeometry(520, 560, 220, 200); waterGeo.rotateX(-Math.PI/2);
-const water = new THREE.Mesh(waterGeo, waterMat); water.position.set(56 + 260, WATER_Y, 0); water.receiveShadow = true; water.renderOrder = 2; scene.add(water);
+// finer grid near the beach so the run-up of the waves is smooth
+const waterGeo = new THREE.PlaneGeometry(520, 560, 320, 220); waterGeo.rotateX(-Math.PI/2);
+{ const wp = waterGeo.attributes.position; for(let i=0;i<wp.count;i++){ const u = (wp.getX(i) + 260)/520; wp.setX(i, Math.pow(u, 1.6)*520 - 260); } }
+const water = new THREE.Mesh(waterGeo, waterMat); water.position.set(48 + 260, WATER_Y, 0); water.receiveShadow = true; water.renderOrder = 2; scene.add(water);
 water.frustumCulled = false;
 
 // The boat. Bow is local -Z, heading uses the player's yaw convention: forward = (-sin h, -cos h).
-const BOAT = {g:new THREE.Group(), x:65.2, z:-0.6, h:-Math.PI/2, v:0, y:WATER_Y, pitch:0, roll:0, vy:0, driver:null, stamp:0, tx:0, tz:0, th:0, hasT:false};
+const BOAT = {g:new THREE.Group(), x:68.9, z:-1.55, h:-Math.PI/2, v:0, y:WATER_Y, pitch:0, roll:0, vy:0, driver:null, stamp:0, tx:0, tz:0, th:0, hasT:false, speed:0, px:68.9, pz:-1.55};
 BOAT.g.position.set(BOAT.x, WATER_Y, BOAT.z); scene.add(BOAT.g);
 {
-  // hull outline at the gunwale (half-widths along the length, from the model)
+  // depth-only lid at the gunwale so the sea isn't drawn inside the hull
   const prof = [[0,0.535],[0.2,0.502],[0.4,0.44],[0.6,0.35],[0.8,0.214],[0.95,0.08],[1,0.02]];
   const sh = new THREE.Shape(); const L = 2.55;
   prof.forEach(([f,w], i) => i ? sh.lineTo(w, -f*L) : sh.moveTo(w, 0));
@@ -574,13 +621,27 @@ BOAT.g.position.set(BOAT.x, WATER_Y, BOAT.z); scene.add(BOAT.g);
   const lid = new THREE.Mesh(lidGeo, new THREE.MeshBasicMaterial({colorWrite:false, transparent:true, depthWrite:true}));
   lid.position.y = 0.28; lid.renderOrder = 1; BOAT.g.add(lid);
 }
+// Single-blade wooden paddle, held from the stern seat
+const PADDLE = {g:new THREE.Group(), phase:0, side:1, active:0, lastP:0, back:false};
+{
+  const wood = new THREE.MeshStandardMaterial({color:new THREE.Color(0x9a7046).convertSRGBToLinear(), roughness:0.75});
+  const dark = new THREE.MeshStandardMaterial({color:new THREE.Color(0x5e4128).convertSRGBToLinear(), roughness:0.8});
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.019, 1.1, 10), wood); shaft.position.y = -0.38; PADDLE.g.add(shaft);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.035, 0.04), dark); grip.position.y = 0.17; PADDLE.g.add(grip);
+  const bs = new THREE.Shape(); bs.moveTo(-0.025, 0); bs.lineTo(0.025, 0); bs.quadraticCurveTo(0.095, -0.06, 0.09, -0.32); bs.quadraticCurveTo(0.08, -0.5, 0, -0.53); bs.quadraticCurveTo(-0.08, -0.5, -0.09, -0.32); bs.quadraticCurveTo(-0.095, -0.06, -0.025, 0);
+  const bladeGeo = new THREE.ExtrudeGeometry(bs, {depth:0.012, bevelEnabled:true, bevelThickness:0.004, bevelSize:0.004, bevelSegments:1}); bladeGeo.translate(0, 0, -0.006);
+  const blade = new THREE.Mesh(bladeGeo, wood); blade.position.y = -0.9; PADDLE.g.add(blade);
+  PADDLE.g.traverse(o => { if(o.isMesh) o.castShadow = true; });
+  BOAT.g.add(PADDLE.g);
+  PADDLE.tip = new THREE.Object3D(); PADDLE.tip.position.y = -1.3; PADDLE.g.add(PADDLE.tip);
+}
 const BOAT_HALF = 2.6, BOAT_SEAT = new V3(0, 0.98, 1.45), BOAT_FEET = new V3(0, 0.05, 1.45);
 function boatHullOk(x, z, h){
   const fx = -Math.sin(h), fz = -Math.cos(h);
-  for(const s of [-1, 0, 1]){
-    const px = x + fx*s*(BOAT_HALF-0.2), pz = z + fz*s*(BOAT_HALF-0.2);
-    if(px < SHORE_X + 1.6) return false;
-    if(Math.hypot(px - ISLE.x, pz - ISLE.z) < ISLE.r + 2.2) return false;
+  for(const s of [-1, -0.5, 0, 0.5, 1]){
+    const px = x + fx*s*(BOAT_HALF-0.15), pz = z + fz*s*(BOAT_HALF-0.15);
+    if(groundAt(px, pz) > WATER_Y - 0.35) return false;                       // would run aground
+    if(px > JETTY.x0 - 0.5 && px < JETTY.x1 + 0.55 && Math.abs(pz - JETTY.z) < JETTY.w/2 + 0.55) return false;
     if(px > 300 || Math.abs(pz) > 230) return false;
   }
   return true;
@@ -590,7 +651,6 @@ function boatDistTo(p){
   const t = clamp((p.x - BOAT.x)*fx + (p.z - BOAT.z)*fz, -BOAT_HALF, BOAT_HALF);
   return Math.hypot(p.x - (BOAT.x + fx*t), p.z - (BOAT.z + fz*t));
 }
-const _wv = {gx:0, gz:0};
 function floatBoat(dt){
   // Sample the waves at bow, stern and both sides for height, pitch and roll
   const fx = -Math.sin(BOAT.h), fz = -Math.cos(BOAT.h), rx = Math.cos(BOAT.h), rz = -Math.sin(BOAT.h);
@@ -599,13 +659,132 @@ function floatBoat(dt){
   const y = (hb + hs + hl + hr)/4;
   const k = 1 - Math.exp(-dt*6);
   const py = BOAT.y; BOAT.y += (y - BOAT.y)*k; BOAT.vy = (BOAT.y - py)/Math.max(dt, 1e-4);
-  const tp = Math.atan2(hb - hs, 4) + Math.min(Math.abs(BOAT.v), 14)*0.008;
-  const tr = Math.atan2(hr - hl, 1.2)*0.5 + (BOAT.turn||0)*Math.min(Math.abs(BOAT.v), 12)*0.012;
+  const tp = Math.atan2(hb - hs, 4) + Math.min(Math.abs(BOAT.speed), 7)*0.01;
+  const tr = Math.atan2(hr - hl, 1.2)*0.5 + (BOAT.turn||0)*Math.min(Math.abs(BOAT.speed), 6)*0.012 + PADDLE.active*PADDLE.side*0.015;
   BOAT.pitch += (tp - BOAT.pitch)*k; BOAT.roll += (tr - BOAT.roll)*k;
   BOAT.g.position.set(BOAT.x, BOAT.y, BOAT.z);
   BOAT.g.rotation.order = 'YXZ'; BOAT.g.rotation.set(BOAT.pitch, BOAT.h, BOAT.roll);
   BOAT.g.updateMatrixWorld(true);
 }
+
+/* Water effects around the hull: spray where the bow cuts the water, a spreading wake, paddle splashes */
+const sprayTex = canvasTex(64, (g, s) => { const gr = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(240,248,250,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, s, s); });
+const SPRAY_N = 260;
+const sprayGeo = new THREE.BufferGeometry();
+const sprayPos = new Float32Array(SPRAY_N*3).fill(-999), sprayV = new Float32Array(SPRAY_N*3), sprayLife = new Float32Array(SPRAY_N);
+sprayGeo.setAttribute('position', new THREE.BufferAttribute(sprayPos, 3));
+const spray = new THREE.Points(sprayGeo, new THREE.PointsMaterial({map:sprayTex, size:0.22, transparent:true, depthWrite:false, opacity:0.85, color:0xf2f7f8}));
+spray.frustumCulled = false; spray.renderOrder = 3; scene.add(spray);
+let sprayI = 0;
+function emitSpray(x, y, z, vx, vy, vz){
+  const i = sprayI++ % SPRAY_N;
+  sprayPos[i*3] = x; sprayPos[i*3+1] = y; sprayPos[i*3+2] = z;
+  sprayV[i*3] = vx; sprayV[i*3+1] = vy; sprayV[i*3+2] = vz; sprayLife[i] = 1.4;
+}
+const foamTex = canvasTex(128, (g, s) => {
+  g.clearRect(0, 0, s, s);
+  for(let i=0;i<1100;i++){ const a = Math.random()*Math.PI*2, r = s*0.5*(0.55 + 0.42*Math.random()); const x = s/2 + Math.cos(a)*r, y = s/2 + Math.sin(a)*r;
+    const al = Math.sin(((r/(s*0.5)) - 0.55)/0.42*Math.PI)*0.55*(0.4 + 0.6*Math.random()); g.fillStyle = `rgba(255,255,255,${al.toFixed(3)})`; g.beginPath(); g.arc(x, y, Math.random()*2.2 + 0.5, 0, 7); g.fill(); }
+  for(let i=0;i<120;i++){ const a = Math.random()*7, r = s*0.5*Math.random()*0.5; g.fillStyle = 'rgba(255,255,255,.18)'; g.beginPath(); g.arc(s/2 + Math.cos(a)*r, s/2 + Math.sin(a)*r, Math.random()*1.8 + 0.4, 0, 7); g.fill(); }
+});
+foamTex.wrapS = foamTex.wrapT = THREE.ClampToEdgeWrapping;
+const WAKE = [], wakeGeo = new THREE.PlaneGeometry(1, 1); wakeGeo.rotateX(-Math.PI/2);
+for(let i=0;i<90;i++){
+  const m = new THREE.Mesh(wakeGeo, new THREE.MeshBasicMaterial({map:foamTex, transparent:true, depthWrite:false, opacity:0, color:0xeef4f5}));
+  m.visible = false; m.renderOrder = 3; scene.add(m);
+  WAKE.push({m, life:0, max:1, vx:0, vz:0, s0:1, s1:3});
+}
+let wakeI = 0;
+function emitWake(x, z, vx, vz, s0, s1, max, rot){
+  const w = WAKE[wakeI++ % WAKE.length];
+  w.m.position.set(x, waveAt(x, z) + 0.1, z); w.m.rotation.y = rot; w.vx = vx; w.vz = vz; w.s0 = s0; w.s1 = s1; w.max = max; w.life = 0; w.m.visible = true;
+}
+let wakeAcc = 0, bowAcc = 0;
+const bowTex = canvasTex(128, (g, s) => {
+  g.clearRect(0, 0, s, s);
+  for(let i=0;i<520;i++){
+    const x = Math.pow(Math.random(), 1.6)*s*0.9, y = Math.random()*s, len = 6 + Math.random()*22;
+    g.strokeStyle = `rgba(255,255,255,${(0.45 + Math.random()*0.55)*(1 - x/s)})`; g.lineWidth = 0.8 + Math.random()*2.2;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.random()*3 - 1, y + len); g.stroke();
+  }
+});
+bowTex.wrapS = THREE.ClampToEdgeWrapping; bowTex.wrapT = THREE.RepeatWrapping;
+const BOWFOAM = [-1, 1].map(sd => {
+  // a wedge that starts at the bow and fans out along the hull, so the foam has no hard edges
+  const sh = new THREE.Shape(); sh.moveTo(0, 0); sh.quadraticCurveTo(0.7, 1.2, 1.35, 3.0); sh.lineTo(0.5, 3.2); sh.quadraticCurveTo(0.2, 3.3, 0, 3.4); sh.lineTo(0, 0);
+  const geo = new THREE.ShapeGeometry(sh, 8); geo.rotateX(Math.PI/2);   // shape y runs toward the stern (+Z)
+  if(sd < 0) geo.scale(-1, 1, 1);                            // texture's dense edge hugs the hull on both sides
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({map:bowTex, transparent:true, depthWrite:false, opacity:0, side:THREE.DoubleSide, color:0xf4f8f8}));
+  m.position.set(sd*0.05, 0.11, -2.45); m.rotation.y = -sd*0.08; m.renderOrder = 3; BOAT.g.add(m);
+  return m;
+});
+const _pt = new V3();
+function boatEffects(dt){
+  // speed from actual motion, so the wake also shows when someone else is paddling
+  const sp = Math.hypot(BOAT.x - BOAT.px, BOAT.z - BOAT.pz)/Math.max(dt, 1e-4);
+  BOAT.px = BOAT.x; BOAT.pz = BOAT.z;
+  BOAT.speed += (Math.min(sp, 20) - BOAT.speed)*Math.min(1, dt*6);
+  const v = BOAT.speed, fx = -Math.sin(BOAT.h), fz = -Math.cos(BOAT.h), rx = Math.cos(BOAT.h), rz = -Math.sin(BOAT.h);
+  bowTex.offset.y -= v*dt*0.35;
+  for(const m of BOWFOAM) m.material.opacity = clamp((v - 0.5)/3.5, 0, 1);
+  if(v > 0.7){
+    // wake: foam patches peel off both sides of the bow and spread outward, a V behind the boat
+    wakeAcc += dt*(1.4 + v*0.9);
+    while(wakeAcc > 1){
+      wakeAcc--;
+      for(const sd of [-1, 1]){
+        const bx = BOAT.x + fx*1.9 + rx*sd*0.42, bz = BOAT.z + fz*1.9 + rz*sd*0.42;
+        emitWake(bx, bz, rx*sd*v*0.32 + fx*v*0.1, rz*sd*v*0.32 + fz*v*0.1, 0.5, 1.6 + v*0.35, 2.2 + v*0.15, BOAT.h + sd*0.5);
+      }
+      if(Math.random() < 0.5) emitWake(BOAT.x - fx*2.6, BOAT.z - fz*2.6, 0, 0, 0.6, 1.2 + v*0.2, 2.2, BOAT.h);
+    }
+    // bow spray: water thrown up and out where the hull breaks into it
+    bowAcc += dt*v*v*2.2;
+    while(bowAcc > 1){
+      bowAcc--;
+      const sd = Math.random() < 0.5 ? -1 : 1, along = rand(1.2, 2.3);
+      const ex = BOAT.x + fx*along + rx*sd*0.45, ez = BOAT.z + fz*along + rz*sd*0.45;
+      const out = rand(0.6, 1.4)*v*0.32, up = rand(0.6, 1.6)*Math.min(v, 7)*0.28;
+      emitSpray(ex, waveAt(ex, ez) + 0.12, ez, rx*sd*out + fx*v*0.35, up, rz*sd*out + fz*v*0.35);
+    }
+  }
+  // spray particles
+  for(let i=0;i<SPRAY_N;i++){
+    if(sprayLife[i] <= 0) continue;
+    sprayLife[i] -= dt; sprayV[i*3+1] -= 9.8*dt;
+    sprayPos[i*3] += sprayV[i*3]*dt; sprayPos[i*3+1] += sprayV[i*3+1]*dt; sprayPos[i*3+2] += sprayV[i*3+2]*dt;
+    if(sprayLife[i] <= 0 || sprayPos[i*3+1] < WATER_Y - 0.3){ sprayLife[i] = 0; sprayPos[i*3+1] = -999; }
+  }
+  sprayGeo.attributes.position.needsUpdate = true;
+  // wake patches
+  for(const w of WAKE){
+    if(!w.m.visible) continue;
+    w.life += dt; const p = w.life/w.max;
+    if(p >= 1){ w.m.visible = false; continue; }
+    w.m.position.x += w.vx*dt; w.m.position.z += w.vz*dt; w.vx *= Math.exp(-dt*1.2); w.vz *= Math.exp(-dt*1.2);
+    w.m.position.y = waveAt(w.m.position.x, w.m.position.z) + 0.1;
+    const sc = w.s0 + (w.s1 - w.s0)*Math.sqrt(p); w.m.scale.set(sc, 1, sc*1.25);
+    w.m.material.opacity = Math.min(1, p*5)*(1 - p)*0.45;
+  }
+}
+
+/* Paddle stroke animation. side +1 = right of the boat. Pull phase 0..0.6, recovery 0.6..1. */
+function paddlePose(dt, active, side, back){
+  const P_ = PADDLE;
+  P_.active += ((active ? 1 : 0) - P_.active)*Math.min(1, dt*6);
+  const p = P_.phase, a = P_.active;
+  let sweep, lift, tilt;
+  if(p < 0.6){ const q = p/0.6; sweep = back ? (0.55 - q*1.1) : (-0.55 + q*1.1); lift = 0; tilt = 0.55; }
+  else { const q = (p - 0.6)/0.4; sweep = back ? (-0.55 + q*1.1) : (0.55 - q*1.1); lift = Math.sin(q*Math.PI)*0.1 + 0.03; tilt = 0.55 + Math.sin(q*Math.PI)*0.3; }
+  // resting: across the boat in front of you, blade out of the water
+  const rest = {x:0.3, y:0.5, z:0.95, rz:1.25, rx:0.45};
+  const st = {x:side*0.22, y:0.64 + lift, z:0.86 + sweep*0.48, rz:side*tilt, rx:-sweep*0.7};
+  const L = (r, s) => r + (s - r)*a;
+  P_.g.position.set(L(rest.x, st.x), L(rest.y, st.y), L(rest.z, st.z));
+  P_.g.rotation.order = 'ZXY'; P_.g.rotation.set(L(rest.rx, st.rx), 0, L(rest.rz, st.rz));
+}
+
+function seaEffectsTick(dt){ boatEffects(dt); }
 
 const SPAWNS = [[-38,-38],[38,-38],[-38,38],[38,38],[0,-40],[0,40],[-40,0],[40,0],[-18,-18],[18,18],[18,-18],[-18,18],[-9,0],[9,0],[0,-9.5],[0,9.5],[-30,-12],[30,12]]
   .filter(([x,z]) => !colliders.some(c => x+0.5>c.min.x && x-0.5<c.max.x && z+0.5>c.min.z && z-0.5<c.max.z));
@@ -620,7 +799,8 @@ function moveBody(b, dt){
   const py = b.pos.y;
   b.pos.y += b.vel.y*dt;
   b.grounded = false;
-  if(b.pos.y <= 0){ b.pos.y = 0; if(b.vel.y<0) b.vel.y = 0; b.grounded = true; }
+  const gy = groundAt(b.pos.x, b.pos.z);
+  if(b.pos.y <= gy){ b.pos.y = gy; if(b.vel.y<0) b.vel.y = 0; b.grounded = true; }
   for(const c of colliders){
     if(!overlaps(b.pos, b.h, c)) continue;
     if(py >= c.max.y-0.02){ b.pos.y = c.max.y; if(b.vel.y<0) b.vel.y=0; b.grounded = true; }
@@ -1899,7 +2079,7 @@ function loadModels(){
   }, undefined, () => {});
 }
 
-/* ---------------- Driving the boat ---------------- */
+/* ---------------- Paddling the boat ---------------- */
 P.boat = false;
 let boatAudio = null, boatPromptOn = false;
 const boatPrompt = $('boatPrompt');
@@ -1908,38 +2088,42 @@ function boatSound(on){
   if(on && !boatAudio){
     const t = AC.currentTime;
     const n = AC.createBufferSource(); n.buffer = noiseBuf; n.loop = true;
-    const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.7;
+    const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 500;
     const wg = AC.createGain(); wg.gain.value = 0.0001; n.connect(f); f.connect(wg); wg.connect(master); n.start(t);
-    const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 42;
-    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320;
-    const og = AC.createGain(); og.gain.value = 0.0001; o.connect(lp); lp.connect(og); og.connect(master); o.start(t);
-    boatAudio = {n, f, wg, o, og};
+    boatAudio = {n, f, wg};
   } else if(!on && boatAudio){
-    const b = boatAudio; boatAudio = null; const t = AC.currentTime;
-    b.wg.gain.setTargetAtTime(0.0001, t, 0.1); b.og.gain.setTargetAtTime(0.0001, t, 0.1);
-    setTimeout(() => { try{ b.n.stop(); b.o.stop(); }catch(e){} }, 600);
+    const b = boatAudio; boatAudio = null;
+    b.wg.gain.setTargetAtTime(0.0001, AC.currentTime, 0.1);
+    setTimeout(() => { try{ b.n.stop(); }catch(e){} }, 600);
   }
+}
+function paddleSplash(big){
+  if(!AC) return; const t = AC.currentTime, out = outNode(big ? 0.55 : 0.25, PADDLE.side*0.4);
+  noiseBurst(out, t, 'lowpass', big ? 900 : 1600, 0, 0.6, big ? 0.32 : 0.18, 0.01);
+  noiseBurst(out, t + 0.03, 'bandpass', 2600, 1.2, 0.18, 0.12, 0.005);
 }
 function enterBoat(){
   P.boat = true; P.vel.set(0,0,0); P.crouch = true; P.crouchToggle = false; P.h = 1.25; P.sprint = false;   // seated: crouch-sized hitbox
-  BOAT.driver = myId; BOAT.v = 0;
-  P.yaw = BOAT.h; P.pitch = -0.06;
+  BOAT.driver = myId; BOAT.v = 0; BOAT.turn = 0; PADDLE.phase = 0;
+  P.yaw = BOAT.h; P.pitch = -0.1;
   thud(0.5, 70); boatSound(true);
-  banner('Boat', 'W / S throttle · A / D steer · E to get out');
+  banner('Boat', 'W paddle · A / D steer · S back-paddle · E get out');
   netDirty = true;
 }
 function exitBoat(forced){
   const fx = -Math.sin(BOAT.h), fz = -Math.cos(BOAT.h);
   let land = null;
   if(!forced){
-    // Nearest dry land: the beach (inside the walls) or the island
-    if(BOAT.x < SHORE_X + 12 && Math.abs(BOAT.z) < 43.5) land = new V3(SHORE_X - 0.4, 0, clamp(BOAT.z, -43.5, 43.5));
+    // Nearest dry land: the beach (inside the walls), the jetty, or the island
+    const nearJetty = BOAT.x < JETTY.x1 + 4 && Math.abs(BOAT.z - JETTY.z) < 3.5;
+    if(nearJetty) land = new V3(JETTY.x1 - 0.6, 0.14, JETTY.z);
+    else if(BOAT.x < shoreX(BOAT.z) + 14 && Math.abs(BOAT.z) < 43.5){ const z = clamp(BOAT.z, -43.5, 43.5), x = shoreX(z) + 1.2; land = new V3(x, groundAt(x, z), z); }
     else {
       const dx = BOAT.x - ISLE.x, dz = BOAT.z - ISLE.z, d = Math.hypot(dx, dz);
-      if(d < ISLE.r + 11) land = new V3(ISLE.x + dx/d*(ISLE.r - 1), 0, ISLE.z + dz/d*(ISLE.r - 1));
+      if(d < ISLE.r + 13) land = new V3(ISLE.x + dx/d*(ISLE.r - 1), 0, ISLE.z + dz/d*(ISLE.r - 1));
     }
-    if(!land){ banner('Too far from land', 'Steer to the beach or the island'); return; }
-    if(colliders.some(c => overlaps(land, 1.8, c))) land.add(new V3(-fx, 0, -fz));
+    if(!land){ banner('Too far from land', 'Paddle to the beach, the jetty or the island'); return; }
+    if(colliders.some(c => overlaps(land, 1.8, c)) && land.y < 0.1) land.add(new V3(-fx, 0, -fz));
   }
   P.boat = false; BOAT.driver = null; BOAT.v = 0; BOAT.turn = 0; BOAT.stamp = Date.now();
   P.crouch = false; P.h = 1.8; P.eye = 1.62;
@@ -1950,29 +2134,52 @@ function exitBoat(forced){
 function toggleBoat(){
   if(!P.alive || paused) return;
   if(P.boat){ exitBoat(false); return; }
-  if(BOAT.driver && BOAT.driver !== myId){ banner('Boat taken', 'Someone else is driving it'); return; }
+  if(BOAT.driver && BOAT.driver !== myId){ banner('Boat taken', 'Someone else is paddling it'); return; }
   if(boatDistTo(P.pos) < 3.4 && P.pos.y < 1.5) enterBoat();
 }
+// Paddling: thrust comes in strokes. W alternates sides; A strokes on the right (turns left), D on the left.
 function driveBoat(dt){
-  const thr = (keys.KeyW?1:0) - (keys.KeyS?1:0), st = (keys.KeyA?1:0) - (keys.KeyD?1:0);
-  const VMAX = 15, VREV = -4;
-  if(thr > 0) BOAT.v += (thr*9.5*(1 - BOAT.v/VMAX))*dt;
-  else if(thr < 0) BOAT.v += (BOAT.v > 0 ? -9 : -3.5)*dt;
-  BOAT.v -= BOAT.v*(thr === 0 ? 0.55 : 0.12)*dt;
-  BOAT.v = clamp(BOAT.v, VREV, VMAX);
-  BOAT.turn = (BOAT.turn||0) + (st - (BOAT.turn||0))*Math.min(1, dt*5);
-  const dh = BOAT.turn * (0.25 + Math.min(Math.abs(BOAT.v), 10)*0.085) * Math.sign(BOAT.v || 1) * dt;
+  const fwd = keys.KeyW ? 1 : 0, back = keys.KeyS ? 1 : 0, st = (keys.KeyA?1:0) - (keys.KeyD?1:0);
+  const paddling = fwd || back || st;
+  const STROKE = 1.05;
+  const p0 = PADDLE.phase;
+  if(paddling) PADDLE.phase += dt/STROKE;
+  else if(PADDLE.phase % 1 > 0.6 || PADDLE.phase % 1 < 0.02) PADDLE.phase = Math.min(Math.floor(PADDLE.phase) + 1, PADDLE.phase + dt/STROKE);  // finish the recovery, then rest
+  if(Math.floor(PADDLE.phase) !== Math.floor(p0)){
+    // new stroke: pick the side
+    PADDLE.side = st > 0 ? 1 : st < 0 ? -1 : -PADDLE.side;
+  }
+  PADDLE.phase %= 1e6;
+  const p = PADDLE.phase % 1, pPrev = p0 % 1;
+  PADDLE.back = !!back && !fwd;
+  const pulling = paddling && p < 0.6;
+  if(paddling && pPrev > 0.9 && p < 0.1 || paddling && pPrev < 0.02 && p >= 0.02 && p < 0.1){ paddleSplash(true); }
+  if(paddling && pPrev < 0.6 && p >= 0.6){ paddleSplash(false); if(Math.random() < 0.3) addDrop(false); }
+  const pull = pulling ? Math.sin(Math.PI*p/0.6) : 0;
+  const dir = PADDLE.back ? -1 : 1;
+  const thrust = pull * (fwd || back ? 7.2 : 2.4) * dir;
+  BOAT.v += thrust*dt;
+  BOAT.v -= (BOAT.v*0.35 + 0.02*BOAT.v*Math.abs(BOAT.v))*dt;
+  BOAT.v = clamp(BOAT.v, -3, 7.5);
+  // a stroke on one side swings the bow the other way; holding A/D also prys the stern
+  let dh = pull * PADDLE.side * (fwd || back ? 0.28 : 0.75) * dir * dt;
+  dh += st * 0.35 * Math.min(Math.abs(BOAT.v), 4)/4 * Math.sign(BOAT.v || 1) * dt;
+  BOAT.turn = (BOAT.turn||0) + (st - (BOAT.turn||0))*Math.min(1, dt*4);
   const nh = BOAT.h + dh;
   const nx = BOAT.x - Math.sin(nh)*BOAT.v*dt, nz = BOAT.z - Math.cos(nh)*BOAT.v*dt;
   if(boatHullOk(nx, nz, nh)){ BOAT.x = nx; BOAT.z = nz; BOAT.h = nh; P.yaw += dh; }
-  else if(boatHullOk(BOAT.x, BOAT.z, nh)){ BOAT.h = nh; P.yaw += dh; BOAT.v *= -0.25; if(Math.abs(BOAT.v) > 1) thud(0.4, 60); }
-  else { if(Math.abs(BOAT.v) > 1) thud(0.4, 60); BOAT.v *= -0.25; }
+  else if(boatHullOk(BOAT.x, BOAT.z, nh)){ BOAT.h = nh; P.yaw += dh; if(Math.abs(BOAT.v) > 1) thud(0.35, 60); BOAT.v *= -0.2; }
+  else { if(Math.abs(BOAT.v) > 1) thud(0.35, 60); BOAT.v *= -0.2; }
+  if(pulling){
+    // splash and drips at the blade
+    PADDLE.tip.getWorldPosition(_pt);
+    if(Math.random() < dt*30*pull) emitSpray(_pt.x, waveAt(_pt.x, _pt.z) + 0.05, _pt.z, rand(-0.6,0.6), rand(0.6,1.6), rand(-0.6,0.6));
+  }
+  paddlePose(dt, paddling || (p > 0.02 && p < 0.98), PADDLE.side, PADDLE.back);
   if(boatAudio){
-    const t = AC.currentTime, s = Math.abs(BOAT.v)/VMAX;
-    boatAudio.wg.gain.setTargetAtTime(0.02 + s*0.32, t, 0.1);
-    boatAudio.f.frequency.setTargetAtTime(500 + s*900, t, 0.1);
-    boatAudio.o.frequency.setTargetAtTime(38 + Math.abs(thr)*18 + s*40, t, 0.15);
-    boatAudio.og.gain.setTargetAtTime(0.04 + Math.abs(thr)*0.07, t, 0.15);
+    const t = AC.currentTime, s = Math.min(1, Math.abs(BOAT.v)/7);
+    boatAudio.wg.gain.setTargetAtTime(0.015 + s*0.22, t, 0.15);
+    boatAudio.f.frequency.setTargetAtTime(380 + s*900, t, 0.15);
   }
 }
 // Seated player follows the boat; the camera sits at the stern looking over the bow
@@ -2000,9 +2207,9 @@ function addDrop(big){
 function updateDrops(dt){
   if(P.boat && P.alive){
     const sp = Math.abs(BOAT.v);
-    if(sp > 3){ dropAcc += dt*(sp - 3)*1.6; while(dropAcc > 1){ dropAcc--; addDrop(Math.random() < 0.3); } }
-    // bow slamming down into a wave throws a burst of spray
-    if(sp > 5 && lastBoatVy > 0.25 && BOAT.vy < -0.25){ const n = 4 + (sp*0.6|0); for(let i=0;i<n;i++) addDrop(Math.random() < 0.5); }
+    if(sp > 2.2){ dropAcc += dt*(sp - 2.2)*1.3; while(dropAcc > 1){ dropAcc--; addDrop(Math.random() < 0.3); } }
+    // the bow dropping into a wave throws a burst of spray
+    if(sp > 3 && lastBoatVy > 0.2 && BOAT.vy < -0.2){ const n = 2 + (sp*0.8|0); for(let i=0;i<n;i++) addDrop(Math.random() < 0.5); }
   }
   lastBoatVy = BOAT.vy;
   const g = dropG; g.clearRect(0, 0, dropCv.width, dropCv.height);
@@ -2019,15 +2226,22 @@ function updateDrops(dt){
   }
 }
 
-/* Called every frame, in or out of a match: waves, parked/remote boat, prompt, drops */
+/* Called every frame, in or out of a match: waves, parked/remote boat, effects, prompt, drops */
 function seaTick(dt){
   seaTime += dt; waterU.uTime.value = seaTime;
-  if(!P.boat && BOAT.hasT){
-    // someone else is driving: glide toward their reported position
-    const k = Math.min(1, dt*10);
-    BOAT.x += (BOAT.tx - BOAT.x)*k; BOAT.z += (BOAT.tz - BOAT.z)*k; BOAT.h += wrapA(BOAT.th - BOAT.h)*k;
+  if(!P.boat){
+    if(BOAT.hasT){
+      // someone else is paddling: glide toward their reported position
+      const k = Math.min(1, dt*10);
+      BOAT.x += (BOAT.tx - BOAT.x)*k; BOAT.z += (BOAT.tz - BOAT.z)*k; BOAT.h += wrapA(BOAT.th - BOAT.h)*k;
+    }
+    floatBoat(dt);
+    // their paddle keeps time with how fast the boat moves
+    const moving = BOAT.hasT && BOAT.speed > 0.5;
+    if(moving){ const pp = PADDLE.phase; PADDLE.phase += dt/1.05; if(Math.floor(PADDLE.phase) !== Math.floor(pp)) PADDLE.side = -PADDLE.side; }
+    paddlePose(dt, moving, PADDLE.side, false);
   }
-  if(!P.boat) floatBoat(dt);
+  boatEffects(dt);
   const near = deployed && P.alive && !P.boat && !paused && boatDistTo(P.pos) < 3.4 && !(BOAT.driver && BOAT.driver !== myId);
   if(near !== boatPromptOn){ boatPromptOn = near; boatPrompt.hidden = !near; }
   updateDrops(dt);

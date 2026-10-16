@@ -7,7 +7,7 @@ First-person multiplayer free-for-all in the browser: AK-74U and combat knife, m
 - **3D:** Three.js r128 + GLTFLoader from CDN.
 
 ## Controls
-WASD move · mouse aim · E get in/out of the boat (W/S throttle, A/D steer) · left click fire/slash · right click aim down sights · R reload · T inspect · 1 knife · 2 rifle · Q / wheel swap · V quick knife · Shift sprint · C crouch · Space jump · Tab scoreboard · Esc pause / invite link.
+WASD move · mouse aim · E get in/out of the rowing boat (W paddle, A/D steer, S back-paddle) · left click fire/slash · right click aim down sights · R reload · T inspect · 1 knife · 2 rifle · Q / wheel swap · V quick knife · Shift sprint · C crouch · Space jump · Tab scoreboard · Esc pause / invite link.
 
 ## Credits
 - AK-74U first-person arms and animations: "AK74U | FREE ANIMATION" by BURNER (https://sketchfab.com/Alexander_Ovelar), CC BY 4.0. Textures recompressed and unused data removed for the web.
