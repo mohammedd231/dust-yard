@@ -34,6 +34,21 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 /* HUD */
 #hud{position:fixed;inset:0;pointer-events:none;font-variant-numeric:tabular-nums}
 #drops{position:absolute;inset:0;width:100%;height:100%}
+.eggsplat{position:absolute;inset:0;opacity:0;pointer-events:none;will-change:transform,opacity}
+.eggsplat svg{width:100%;height:100%;display:block}
+.coin{display:inline-block;width:.95em;height:.95em;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff3b0,#f7c531 45%,#c88a06);box-shadow:inset 0 0 0 2px rgba(120,70,0,.45);vertical-align:-.12em;margin-right:4px}
+.coins{position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(92px + env(safe-area-inset-bottom,0px));background:var(--panel);border:1px solid var(--line);padding:6px 12px;display:flex;align-items:center;gap:4px;font-size:18px}
+.coins b{font-weight:700;color:#f7c531}
+.coins small{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-left:4px}
+.coins.pop{animation:coinpop .5s ease-out}
+@keyframes coinpop{0%{transform:scale(1)}30%{transform:scale(1.25)}100%{transform:scale(1)}}
+.shopp{top:62%;flex-direction:column;gap:4px;text-align:center}
+.shopp div{display:flex;gap:8px;align-items:center;justify-content:center}
+.shopp small{display:block;font-size:10px;opacity:.75;letter-spacing:.1em}
+.shopp.no{color:#c9c2b0}
+.ammo .lbl.legend{color:#f7c531;text-shadow:0 0 8px rgba(247,197,49,.6)}
+.slots span.leg{border-color:#f7c531;color:#f7c531}
+.slots span.leg.on{background:linear-gradient(90deg,#f7c531,#ffe27a);color:#3a2600;box-shadow:0 0 12px rgba(247,197,49,.6)}
 .scope{position:absolute;inset:0;opacity:0;transition:opacity .06s;overflow:hidden}
 .scope .lens{position:absolute;left:50%;top:50%;width:min(96vh,96vw);height:min(96vh,96vw);transform:translate(-50%,-50%);border-radius:50%;box-shadow:0 0 0 200vmax #000,inset 0 0 50px 22px rgba(0,0,0,.9),inset 0 0 0 3px #000}
 .scope svg{position:absolute;inset:0;width:100%;height:100%}
@@ -164,6 +179,9 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 
 <div id="hud" hidden>
   <canvas id="drops"></canvas>
+  <div class="eggsplat" id="eggSplat"></div>
+  <div class="coins" id="coins" title="Coins: 1 per kill"><span class="coin"></span><b id="coinN">0</b><small>coins</small></div>
+  <div class="boatp shopp" id="shopPrompt" hidden></div>
   <div class="scope" id="scope"><div class="lens"><svg viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
     <g fill="#000" stroke="none"><rect x="0" y="98.4" width="62" height="3.2"/><rect x="138" y="98.4" width="62" height="3.2"/><rect x="98.4" y="138" width="3.2" height="62"/><rect x="98.4" y="0" width="3.2" height="62"/></g>
     <g stroke="#000" stroke-width="0.45"><line x1="62" y1="100" x2="138" y2="100"/><line x1="100" y1="62" x2="100" y2="138"/></g>
@@ -181,7 +199,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
   <div class="vign" id="vign"></div>
   <div class="banner" id="banner"><b id="bannerT"></b><span id="bannerS"></span></div>
   <div class="health" id="health"><div class="lbl">Health</div><div class="hpnum" id="hpNum">100</div><div class="bar"><i id="hpBar"></i></div></div>
-  <div class="ammo"><div class="lbl" id="wpnLbl">AK-74U · 5.45×39 · Auto</div><div><span class="mag" id="mag">30</span><span class="res" id="res">/ 90</span></div><div class="reload" id="reloadHint" hidden>Press R to reload</div><div class="slots"><span id="slot1">1 Knife</span><span id="slot2" class="on">2 AK-74U</span><span id="slot3">3 Sniper</span></div></div>
+  <div class="ammo"><div class="lbl" id="wpnLbl">AK-74U · 5.45×39 · Auto</div><div><span class="mag" id="mag">30</span><span class="res" id="res">/ 90</span></div><div class="reload" id="reloadHint" hidden>Press R to reload</div><div class="slots"><span id="slot1">1 Knife</span><span id="slot2" class="on">2 AK-74U</span><span id="slot3">3 Sniper</span><span id="slot4" hidden>4 Eggs</span><span id="slot5" class="leg" hidden>5 Slipper</span></div></div>
   <div class="dead" id="dead" hidden><div class="lbl">Killed by</div><div class="who" id="deadWho"></div><div class="sub" id="deadSub"></div></div>
   <div class="protect" id="protect" hidden>Spawn protection</div>
   <div class="board" id="board" hidden>
@@ -227,7 +245,8 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
       <dt>V</dt><dd>Quick knife slash · two hits kill, a stab in the back kills instantly</dd>
       <dt>Shift · C · Space</dt><dd>Sprint · crouch · jump</dd>
       <dt>3</dt><dd>Sniper · right click looks through the scope</dd>
-      <dt>E</dt><dd>Get in / out of the rowing boat at the jetty</dd>
+      <dt>E</dt><dd>Get in / out of the rowing boat · buy at BIM</dd>
+      <dt>4 · 5</dt><dd>Eggs and the BIM slipper (buy with coins, 1 per kill)</dd>
       <dt>Tab</dt><dd>Hold for scoreboard</dd>
       <dt>Esc</dt><dd>Pause, copy the invite link or leave</dd>
     </dl>
@@ -549,7 +568,7 @@ function landClamp(p){
   // Cover on the island and the beach
   crate(ISLE.x-6.5, ISLE.z-1); crate(ISLE.x-5.55, ISLE.z-1); crate(ISLE.x-6.5, ISLE.z-1, 0.9);
   B(ISLE.x+6, ISLE.z-3, 0.7, 4, 1.1, 'sandbag'); B(ISLE.x-7, ISLE.z+5, 4, 0.7, 1.1, 'sandbag'); B(ISLE.x+1, ISLE.z+8.5, 3, 0.7, 1.1, 'sandbag');
-  B(50, -12, 0.7, 4, 1.1, 'sandbag'); B(50, 12, 0.7, 4, 1.1, 'sandbag'); crate(53, -20); crate(53.95, -20); crate(52, 31);
+  B(50, -12, 0.7, 4, 1.1, 'sandbag'); B(50, 12, 0.7, 4, 1.1, 'sandbag'); crate(53, -20); crate(53.95, -20);
   // Wooden jetty out to the boat (you can walk on it)
   const plankTex = canvasTex(256,(g,s)=>{ for(let i=0;i<8;i++){ g.fillStyle=`hsl(28,${30+rand(-6,6)}%,${30+rand(-5,5)}%)`; g.fillRect(0,i*s/8,s,s/8-3); g.fillStyle='rgba(20,12,6,.6)'; g.fillRect(0,i*s/8+s/8-3,s,3); } speckle(g,s,2500,false,0.3); speckle(g,s,900,true,0.12); });
   plankTex.repeat.set(1, 6); plankTex.rotation = Math.PI/2;
@@ -1373,7 +1392,7 @@ function leaveMatch(silent){
   clearRemotes(); matchId = null; matchName = ''; roomState = 'offline';
   if(!silent){ lobbyTrack(); try{ history.replaceState(null, '', location.pathname); }catch(e){} }
 }
-function dropRemote(id){ const r = remotes.get(id); if(r){ disposeAvatar(r.av); remotes.delete(id); updateNetUI(); } }
+function dropRemote(id){ const r = remotes.get(id); if(r){ clearRemoteProj(r); disposeAvatar(r.av); remotes.delete(id); updateNetUI(); } }
 function clearRemotes(){ for(const r of remotes.values()) disposeAvatar(r.av); remotes.clear(); }
 function onState(pr){
   if(!pr || pr.v !== 1 || typeof pr.id !== 'string' || pr.id === myId || pr.id.length > 24 || !Array.isArray(pr.p)) return;
@@ -1403,15 +1422,15 @@ function updateRemote(r, pr, first){
       const id = num(h[0],0);
       if(id <= r.lastHit) continue;
       r.lastHit = id;
-      if(h[1] === myId) applyDamage(clamp(num(h[2],0),0,150), {kind:'peer', id:r.peer, name:r.name, pos:r.cur.clone()}, !!h[3], num(h[4],0));
+      if(h[1] === myId){ if(num(h[4],0) === 4){ if(P.alive) eggSplat(r.name); } else applyDamage(clamp(num(h[2],0),0,150), {kind:'peer', id:r.peer, name:r.name, pos:r.cur.clone()}, !!h[3], num(h[4],0)); }
     }
     const ds = num(pr.ds,0);
     if(ds > r.lastDs){
       r.lastDs = ds;
       const killer = typeof pr.kb === 'string' ? pr.kb : '';
       const hs = !!pr.hs;
-      const wpn = pr.kw === 'knife' ? 'Knife' : pr.kw === 'sniper' ? SNIPER_NAME : RIFLE_NAME;
-      if(killer && killer === myId){ P.k++; netDirty = true; feed(myName, r.name, hs, true, wpn); banner((wpn==='Knife'?'Knifed ':'Eliminated ') + r.name, hs ? 'Headshot · +1' : '+1 kill'); hitTick(true); }
+      const wpn = pr.kw === 'knife' ? 'Knife' : pr.kw === 'sniper' ? SNIPER_NAME : pr.kw === 'slipper' ? SLIPPER_NAME : RIFLE_NAME;
+      if(killer && killer === myId){ P.k++; earnCoin(); netDirty = true; feed(myName, r.name, hs, true, wpn); banner((wpn==='Knife'?'Knifed ':'Eliminated ') + r.name, (hs ? 'Headshot · ' : '') + '+1 kill · +1 coin'); hitTick(true); }
       else feed(killer ? remoteName(killer) : 'Unknown', r.name, hs, false, wpn);
     }
     const ml = num(pr.ml,0);
@@ -1431,6 +1450,7 @@ function updateRemote(r, pr, first){
   }
   r.wp = pr.wp === 1 ? 1 : 2;
   r.yawT = num(pr.ry,0); r.pitchT = clamp(num(pr.rx,0),-1.5,1.5); r.crouch = !!pr.cr;
+  updateRemoteProj(r, Array.isArray(pr.pj) ? pr.pj.slice(0, 8) : []);
   const bt = Array.isArray(pr.bt) && pr.bt.length === 3 ? pr.bt.map(v => num(v, 0)) : null;
   if(bt && !P.boat){ BOAT.tx = clamp(bt[0], 50, 300); BOAT.tz = clamp(bt[1], -230, 230); BOAT.th = bt[2]; if(!BOAT.hasT){ BOAT.x = BOAT.tx; BOAT.z = BOAT.tz; BOAT.h = BOAT.th; } BOAT.hasT = true; BOAT.driver = r.peer; r.inBoat = true; }
   else if(!bt && r.inBoat){ r.inBoat = false; if(BOAT.driver === r.peer){ BOAT.driver = null; BOAT.hasT = false; BOAT.v = 0; } }
@@ -1447,6 +1467,7 @@ function sendPresence(t){
   lastPresence = t; netDirty = false;
   const payload = {v:1, id:myId, n:myName, hu:r3(myHue), p:[r2(P.pos.x),r2(P.pos.y),r2(P.pos.z)], ry:r3(P.yaw), rx:r3(P.pitch+P.punch), cr:P.crouch?1:0, al:P.alive?1:0, hp:Math.round(P.hp), k:P.k, d:P.d, ds:P.ds, kb:P.kb||'', hs:P.kbHs, kw:P.kw, ml:P.ml, wp:P.weapon, sh:P.sh, te:P.te||[0,0,0], hits:myHits.slice(-8), bp:[r2(BOAT.x), r2(BOAT.z), r3(BOAT.h), BOAT.stamp]};
   if(P.boat) payload.bt = [r2(BOAT.x), r2(BOAT.z), r3(BOAT.h)];
+  if(PROJ.length) payload.pj = PROJ.slice(-6).map(q => [q.id, q.type, r2(q.pos.x), r2(q.pos.y), r2(q.pos.z)]);
   try{ const p = game.send({type:'broadcast', event:'st', payload}); if(p && p.catch) p.catch(()=>{}); }catch(e){}
 }
 function updateRemotes(dt){
@@ -1564,7 +1585,7 @@ function botFire(b, eye, tgt, dist, t){
   b.av.g.updateMatrixWorld(true);
   const muzzle = b.av.muz.getWorldPosition(new V3());
   const pSpeed = Math.hypot(P.vel.x, P.vel.z);
-  const err = 0.02 + dist*0.0011 + pSpeed*0.007 + (P.crouch?0:0.004);
+  const err = 0.02 + dist*0.0011 + pSpeed*0.007 + (P.crouch?0:0.004) + (t < (b.blindUntil||0) ? 0.4 : 0);
   const dir = coneDir(tgt.clone().sub(eye).normalize(), err);
   const w = rayWorld(eye, dir, 200);
   const c = P.alive ? rayCharacter(eye, dir, P.pos, P.crouch) : null;
@@ -1706,9 +1727,9 @@ function damageBot(b, dmg, hs, wpn, t){
   if(t <= b.protectUntil || !b.alive) return false;
   b.hp -= dmg; b.alertUntil = t + 4; b.lastSeen = P.pos.clone();
   if(b.hp > 0) return false;
-  b.alive = false; b.d++; b.respawnAt = t + 3; P.k++;
+  b.alive = false; b.d++; b.respawnAt = t + 3; P.k++; earnCoin();
   feed(myName, b.name, hs, true, wpn);
-  banner((wpn==='Knife' ? 'Knifed ' : 'Eliminated ') + b.name, hs ? 'Headshot · +1' : '+1 kill');
+  banner((wpn==='Knife' ? 'Knifed ' : 'Eliminated ') + b.name, (hs ? 'Headshot · ' : '') + '+1 kill · +1 coin');
   return true;
 }
 const MELEE_TIME = 0.5;
@@ -1753,6 +1774,7 @@ function switchWeapon(w){
   if(!P.alive || P.melee > 0) return;
   if(w === P.nextWeapon) return;
   if(w === P.weapon && P.switchT <= 0) return;
+  if(!ownsWeapon(w)){ banner(w === 4 ? 'No eggs' : 'No slipper', 'Buy them at the BIM market on the beach'); return; }
   P.nextWeapon = w; P.switchT = SWITCH_TIME; P.reload = 0; adsHeld = false; sniperCancel();
   click(650, 0.3, 0.06);
 }
@@ -1939,7 +1961,7 @@ function poseSniper(dt, drop, bx, by, sk){
 }
 
 function applyDamage(dmg, src, hs, wcode){
-  const isKnife = wcode === 1 || wcode === true, isSniper = wcode === 2;
+  const isKnife = wcode === 1 || wcode === true, isSniper = wcode === 2, isSlipper = wcode === 3;
   const t = now();
   if(!P.alive || t < P.protectUntil) return;
   P.hp -= dmg; P.lastDmg = t;
@@ -1948,17 +1970,18 @@ function applyDamage(dmg, src, hs, wcode){
   const ang = Math.atan2(src.pos.x - P.pos.x, src.pos.z - P.pos.z);
   dmgAngle = wrapA(ang - P.yaw + Math.PI); dmgT = 1.2;
   if(P.hp <= 0){
-    P.hp = 0; P.alive = false; P.d++; P.ds++; P.kb = src.kind==='peer' ? src.id : ''; P.kbHs = hs?1:0; P.kw = isKnife ? 'knife' : isSniper ? 'sniper' : 'ak'; P.melee = 0; knife.visible = false;
+    P.hp = 0; P.alive = false; P.d++; P.ds++; P.kb = src.kind==='peer' ? src.id : ''; P.kbHs = hs?1:0; P.kw = isKnife ? 'knife' : isSniper ? 'sniper' : isSlipper ? 'slipper' : 'ak'; P.melee = 0; knife.visible = false;
     if(P.boat) exitBoat(true);
     P.deathAt = t; P.respawnAt = t + 3; P.reload = 0; firing = false; P.vel.set(0,P.vel.y,0);
     if(src.bot) src.bot.k++;
     killerName = src.name; killerHs = hs; P.killerKnife = !!isKnife;
-    feed(src.name, myName, hs, true, isKnife ? 'Knife' : isSniper ? SNIPER_NAME : RIFLE_NAME);
+    feed(src.name, myName, hs, true, isKnife ? 'Knife' : isSniper ? SNIPER_NAME : isSlipper ? SLIPPER_NAME : RIFLE_NAME);
     netDirty = true;
   }
 }
 let killerName = '', killerHs = false, vignetteT = 0, dmgAngle = 0, dmgT = 0;
 function respawn(){
+  clearEggSplat();
   const t = now();
   const enemies = [];
   for(const r of remotes.values()) if(r.alive) enemies.push(r.cur.clone());
@@ -2013,12 +2036,16 @@ function updateHUD(dt, t){
   $('hpNum').textContent = Math.ceil(P.hp);
   $('hpBar').style.width = P.hp + '%';
   $('health').classList.toggle('low', P.hp < 35);
-  const kn = P.weapon === 1, sn = P.weapon === 3;
-  $('mag').textContent = kn ? '—' : sn ? SN.mag : P.mag; $('mag').classList.toggle('low', !kn && (sn ? SN.mag <= 1 : P.mag <= 7));
-  $('res').textContent = kn ? '' : '/ ' + (sn ? SN.reserve : P.reserve);
-  $('wpnLbl').textContent = kn ? 'KA-BAR · Combat knife' : sn ? SNIPER_NAME + ' · .338 · Bolt action' : RIFLE_NAME + ' · 5.45×39 · Auto';
+  const kn = P.weapon === 1, sn = P.weapon === 3, eg = P.weapon === 4, slp = P.weapon === 5;
+  $('mag').textContent = kn ? '—' : sn ? SN.mag : eg ? P.eggs : slp ? P.slippers : P.mag; $('mag').classList.toggle('low', !kn && !eg && !slp && (sn ? SN.mag <= 1 : P.mag <= 7));
+  $('res').textContent = (kn || eg || slp) ? '' : '/ ' + (sn ? SN.reserve : P.reserve);
+  $('wpnLbl').textContent = kn ? 'KA-BAR · Combat knife' : sn ? SNIPER_NAME + ' · .338 · Bolt action' : eg ? 'Eggs · BIM · blinds for 4 s' : slp ? SLIPPER_NAME + ' · Legendary · homing' : RIFLE_NAME + ' · 5.45×39 · Auto';
   $('slot1').classList.toggle('on', P.nextWeapon === 1); $('slot2').classList.toggle('on', P.nextWeapon === 2); $('slot3').classList.toggle('on', P.nextWeapon === 3);
-  if(sn){
+  $('slot4').hidden = P.eggs <= 0; $('slot4').textContent = '4 Eggs ×' + P.eggs; $('slot4').classList.toggle('on', P.nextWeapon === 4);
+  $('slot5').hidden = P.slippers <= 0; $('slot5').classList.toggle('on', P.nextWeapon === 5);
+  $('wpnLbl').classList.toggle('legend', slp);
+  if(eg || slp){ $('reloadHint').hidden = true; }
+  else if(sn){
     $('reloadHint').hidden = !(P.alive && (SN.busy > 0 || (SN.mag < SN_MAG && SN.reserve > 0)));
     $('reloadHint').textContent = SN.phase === 'reload' ? 'Changing magazine…' : SN.phase === 'bolt' ? 'Working the bolt…' : SN.busy > 0 ? '…' : 'Press R to reload';
   } else {
@@ -2135,6 +2162,7 @@ function startGame(id, name, created){
   initAudio(); saveName();
   if(id) joinMatch(id, name); else leaveMatch(true);
   P.k = P.d = P.ds = 0; P.kb = ''; P.kbHs = 0; P.sh = 0; hitSeq = 0; myHits.length = 0;
+  P.coins = 0; P.eggs = 0; P.slippers = 0; $('coinN').textContent = '0'; for(const q of PROJ) if(q.mesh) scene.remove(q.mesh); PROJ.length = 0; clearEggSplat();
   for(const b of bots){ b.k = b.d = 0; }
   feedEl.textContent = '';
   deployed = true; respawn(); resume(); requestLock();
@@ -2199,7 +2227,7 @@ let lastWheel = 0;
 window.addEventListener('wheel', e => {
   if(!deployed || paused) return;
   const t = now(); if(t - lastWheel < 0.25) return; lastWheel = t;
-  switchWeapon(e.deltaY > 0 ? P.nextWeapon % 3 + 1 : (P.nextWeapon + 1) % 3 + 1);
+  cycleWeapon(e.deltaY > 0 ? 1 : -1);
 }, {passive:true});
 window.addEventListener('mousemove', e => {
   if(!deployed || paused || !(locked || lockFailed)) return;
@@ -2217,9 +2245,11 @@ window.addEventListener('keydown', e => {
   if(e.code === 'Digit1' || e.code === 'Numpad1') switchWeapon(1);
   if(e.code === 'Digit2' || e.code === 'Numpad2') switchWeapon(2);
   if(e.code === 'Digit3' || e.code === 'Numpad3') switchWeapon(3);
-  if(e.code === 'KeyQ') switchWeapon(P.nextWeapon % 3 + 1);
+  if(e.code === 'Digit4' || e.code === 'Numpad4') switchWeapon(4);
+  if(e.code === 'Digit5' || e.code === 'Numpad5') switchWeapon(5);
+  if(e.code === 'KeyQ') cycleWeapon(1);
   if(e.code === 'KeyT' && ARMS && P.alive && P.weapon === 2 && P.switchT <= 0 && P.reload <= 0 && !firing && P.ads < 0.1 && !ARMS.cur) armsPlay('INSPEC', 0.2);
-  if(e.code === 'KeyE'){ toggleBoat(); return; }
+  if(e.code === 'KeyE'){ if(!tryBuy()) toggleBoat(); return; }
   if(e.code === 'Space' && P.grounded && P.alive && !P.boat){ P.vel.y = P.crouch ? 4.5 : 6.2; footstep(0.35); }
   if(e.code === 'KeyC' && !P.boat) P.crouchToggle = !P.crouchToggle;
 });
@@ -2261,6 +2291,9 @@ function setAvatarWeapon(av, wp){
 function loadModels(){
   if(!THREE.GLTFLoader) return;
   const loader = new THREE.GLTFLoader();
+  loader.load('models/bim/market.glb', g => setupBimMarket(g), undefined, () => {});
+  loader.load('models/bim/slipper.glb', g => setupSlipper(g), undefined, () => {});
+  loader.load('models/bim/egg_box.glb', g => setupEggBox(g), undefined, () => {});
   loader.load('models/sniper.glb', g => { setupSniper(g); if(deployed && P.weapon === 3) sniperPlay('DRAW', 0.02); }, undefined, () => {});
   loader.load('models/sea/boat.glb', g => {
     const m = g.scene;
@@ -2482,6 +2515,435 @@ function seaTick(dt){
   updateDrops(dt);
 }
 
+/* ---------------- BIM market, coins, eggs and the legendary slipper ----------------
+   Every kill pays 1 coin. On the beach stands a BIM: an egg box (3 coins, 6 eggs) and the
+   glowing BIM slipper (5 coins). Eggs (key 4) splat on an enemy's screen and blind them for
+   4 s. The slipper (key 5) spins after its target wherever they go, through walls, until it
+   lands and kills them. */
+const BIM = {x:49.6, z:30, s:1.8, items:[], model:null, slipperProto:null};
+const EGG_PRICE = 3, EGGS_PER_BOX = 6, SLIPPER_PRICE = 5, SLIPPER_NAME = 'BIM Slipper';
+P.coins = 0; P.eggs = 0; P.slippers = 0; P.throwT = 0;
+// market model space (metres, before the 1.8x scale): kiosk x -1.7..1.7, z -2.16..1.66; the model is turned round
+function bimW(lx, ly, lz){ return new V3(BIM.x - lx*BIM.s, ly*BIM.s, BIM.z - (lz + 0.25)*BIM.s); }
+function bimBox(x0, y0, z0, x1, y1, z1){
+  const a = bimW(x0, y0, z0), b = bimW(x1, y1, z1);
+  colliders.push({min:new V3(Math.min(a.x,b.x), Math.min(a.y,b.y), Math.min(a.z,b.z)), max:new V3(Math.max(a.x,b.x), Math.max(a.y,b.y), Math.max(a.z,b.z))});
+}
+{
+  // walls (the doorway is the end of the right-hand aisle, facing the gate), counters, table, floor, drinks machine
+  bimBox(-1.72, 0, -2.18, -1.62, 2.43, 1.68);             // side wall
+  bimBox(1.62, 0, -2.18, 1.72, 2.43, 1.68);               // side wall (aisle side)
+  bimBox(-1.72, 0, -2.2, 1.72, 2.43, -2.12);              // back wall
+  bimBox(-1.72, 0, 1.62, 0.8, 2.43, 1.7);                 // front wall left of the door
+  bimBox(-1.62, 0, -2.12, 1.62, 1.0, -0.9);               // counters and shelves along the back
+  bimBox(-1.45, 0, -0.8, 0.82, 0.88, 1.62);               // middle table of goods
+  bimBox(0.38, 0, -2.62, 1.25, 1.15, -2.16);              // drinks machine outside
+  bimBox(-1.7, -0.2, -2.16, 1.7, 0.12, 1.66);             // raised tile floor
+  // pedestal for the slipper at the end of the aisle
+  const ped = bimW(1.22, 0, -0.55);
+  colliders.push({min:new V3(ped.x - 0.32, 0, ped.z - 0.32), max:new V3(ped.x + 0.32, 1.12, ped.z + 0.32)});
+}
+// Glow textures
+const glowTex = canvasTex(128, (g, s) => { g.clearRect(0,0,s,s); const gr = g.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2); gr.addColorStop(0,'rgba(255,230,140,1)'); gr.addColorStop(0.25,'rgba(255,200,60,.55)'); gr.addColorStop(1,'rgba(255,170,0,0)'); g.fillStyle = gr; g.fillRect(0,0,s,s); });
+const GOLD = new THREE.Color(0xffc23a);
+function makeGlowSprite(size, op){ const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex, color:0xffd060, transparent:true, opacity:op, depthWrite:false, blending:THREE.AdditiveBlending})); sp.scale.setScalar(size); return sp; }
+// A plain egg for the hand and for flight
+const eggGeo = new THREE.SphereGeometry(0.045, 16, 12); eggGeo.scale(1, 1.3, 1);
+const eggMat = new THREE.MeshStandardMaterial({color:new THREE.Color(0xf3e6d0).convertSRGBToLinear(), roughness:0.55});
+// Shop displays (filled in when the models load)
+const SLIPPER_SHOW = {g:new THREE.Group(), light:null, halo:null, beam:null, sparks:null};
+{
+  const ped = bimW(1.22, 0, -0.55);
+  const pedMat = new THREE.MeshStandardMaterial({color:0x1d1a17, roughness:0.4, metalness:0.6});
+  const trim = new THREE.MeshStandardMaterial({color:0xffc23a, roughness:0.3, metalness:0.9, emissive:0x664400, emissiveIntensity:0.6});
+  const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 1.05, 24), pedMat); p1.position.set(ped.x, 0.525, ped.z); p1.castShadow = p1.receiveShadow = true; scene.add(p1);
+  const p2 = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.025, 8, 32), trim); p2.rotation.x = Math.PI/2; p2.position.set(ped.x, 1.06, ped.z); scene.add(p2);
+  const p3 = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.02, 8, 32), trim); p3.rotation.x = Math.PI/2; p3.position.set(ped.x, 0.05, ped.z); scene.add(p3);
+  SLIPPER_SHOW.g.position.set(ped.x, 1.42, ped.z); scene.add(SLIPPER_SHOW.g);
+  SLIPPER_SHOW.light = new THREE.PointLight(0xffb52e, 1.6, 7, 2); SLIPPER_SHOW.light.position.set(ped.x, 1.5, ped.z); scene.add(SLIPPER_SHOW.light);
+  SLIPPER_SHOW.halo = makeGlowSprite(1.3, 0.4); SLIPPER_SHOW.halo.position.copy(SLIPPER_SHOW.g.position); scene.add(SLIPPER_SHOW.halo);
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 3.2, 20, 1, true), new THREE.MeshBasicMaterial({color:0xffc040, transparent:true, opacity:0.13, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide}));
+  beam.position.set(ped.x, 1.05 + 1.6, ped.z); scene.add(beam); SLIPPER_SHOW.beam = beam;
+  const N = 40, pos = new Float32Array(N*3), sg = new THREE.BufferGeometry();
+  for(let i=0;i<N;i++){ pos[i*3] = ped.x + rand(-0.3,0.3); pos[i*3+1] = 1.1 + Math.random()*1.6; pos[i*3+2] = ped.z + rand(-0.3,0.3); }
+  sg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  SLIPPER_SHOW.sparks = new THREE.Points(sg, new THREE.PointsMaterial({map:glowTex, color:0xffd070, size:0.09, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending}));
+  scene.add(SLIPPER_SHOW.sparks);
+  BIM.items.push({kind:'slipper', price:SLIPPER_PRICE, pos:new V3(ped.x, 1.3, ped.z), name:'BIM Slipper', note:'Legendary · homing'});
+  const eggAt = bimW(0.55, 0.88, 0.35);
+  BIM.items.push({kind:'egg', price:EGG_PRICE, pos:eggAt.clone().setY(1.6), name:'Egg box', note:EGGS_PER_BOX + ' eggs · blinds for 4 s', at:eggAt});
+}
+function normalizeModel(scn, size){
+  scn.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(scn), c = bb.getCenter(new V3()), sz = bb.getSize(new V3());
+  const k = size/Math.max(sz.x, sz.y, sz.z);
+  const holder = new THREE.Group(); scn.position.sub(c); holder.add(scn); holder.scale.setScalar(k);
+  return holder;
+}
+function setupBimMarket(g){
+  const m = g.scene;
+  m.traverse(o => { if(o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+  m.updateMatrixWorld(true);
+  const drop = [];
+  m.traverse(o => {
+    if(!o.isMesh) return;
+    const mn = (o.material && o.material.name) || '';
+    if(mn === 'material_1' || mn === 'Granite_Dark_Gray'){ drop.push(o); return; }   // the big grey slab round the kiosk
+    if(mn === 'Beige_5' || mn === 'Burnt_Umber_3' || mn === 'WhiteSmoke'){ drop.push(o); return; }   // cardboard shopper standing where the slipper goes
+    if(/Translucent_Glass/.test(mn)){
+      o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = Math.min(o.material.opacity, 0.28); o.material.depthWrite = false; o.renderOrder = 1;
+      cutTris(o, v => (v.z > 1.5 && v.x > 0.76 && v.x < 1.72 && v.y < 2.2) || v.y > 2.45, 0.004);   // doorway, and the old 'Mini Market' lettering (tiny triangles)
+    }
+  });
+  drop.forEach(o => o.parent.remove(o));
+  const inner = new THREE.Group(); inner.add(m); m.position.z = 0.25;
+  const holder = new THREE.Group(); holder.add(inner); holder.scale.setScalar(BIM.s); holder.rotation.y = Math.PI; holder.position.set(BIM.x, 0, BIM.z);
+  scene.add(holder); BIM.model = holder;
+  addBimSigns();
+}
+// drop the triangles whose three corners all pass the test (model space)
+function cutTris(mesh, test, minArea){
+  const geo = mesh.geometry; if(!geo.index) return;
+  const pa = geo.attributes.position, arr = pa.array, isz = pa.itemSize;
+  const norm = !pa.normalized ? 1 : arr instanceof Int16Array ? 1/32767 : arr instanceof Uint16Array ? 1/65535 : arr instanceof Int8Array ? 1/127 : arr instanceof Uint8Array ? 1/255 : 1;
+  const mw = mesh.matrixWorld, v = new V3(), inDoor = new Uint8Array(pa.count), wp = new Float32Array(pa.count*3);
+  for(let i=0;i<pa.count;i++){
+    if(pa.isInterleavedBufferAttribute) v.set(pa.getX(i)*norm, pa.getY(i)*norm, pa.getZ(i)*norm); else v.set(arr[i*isz]*norm, arr[i*isz+1]*norm, arr[i*isz+2]*norm);
+    v.applyMatrix4(mw); wp[i*3] = v.x; wp[i*3+1] = v.y; wp[i*3+2] = v.z;
+    inDoor[i] = test(v) ? 1 : 0;
+  }
+  const idx = geo.index.array, keep = [];
+  const A = new V3(), Bv = new V3(), Cv = new V3();
+  for(let t=0;t<idx.length;t+=3){
+    const a = idx[t], b = idx[t+1], c = idx[t+2];
+    if(inDoor[a] && inDoor[b] && inDoor[c]) continue;
+    if(minArea){
+      A.fromArray(wp, a*3); Bv.fromArray(wp, b*3).sub(A); Cv.fromArray(wp, c*3).sub(A);
+      if(Bv.cross(Cv).length()*0.5 < minArea) continue;
+    }
+    keep.push(a, b, c);
+  }
+  if(keep.length < idx.length) geo.setIndex(new THREE.BufferAttribute(new (pa.count > 65535 ? Uint32Array : Uint16Array)(keep), 1));
+}
+function addBimSigns(){
+  new THREE.TextureLoader().load('models/bim/bim_logo.png', tex => {
+    tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+    const red = new THREE.MeshBasicMaterial({color:new THREE.Color(0xeb1c24).convertSRGBToLinear()});
+    const logo = new THREE.MeshBasicMaterial({map:tex, transparent:true});
+    const board = (w, h, x, y, z, ry) => {
+      const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = ry;
+      const bg = new THREE.Mesh(new THREE.PlaneGeometry(w, h), red); g.add(bg);
+      const lw = Math.min(w*0.9, h*0.9*2.1), lg = new THREE.Mesh(new THREE.PlaneGeometry(lw, lw/2.1), logo); lg.position.z = 0.01; g.add(lg);
+      scene.add(g);
+    };
+    // roof sign over the old purple one, both faces
+    const c = bimW(0, 2.715, -0.25), L = 3.9*BIM.s, H = 0.66*BIM.s;
+    board(L, H, c.x + 0.16, c.y, c.z, Math.PI/2);
+    board(L, H, c.x - 0.16, c.y, c.z, -Math.PI/2);
+    // and a sign over the door, facing the gate
+    const d = bimW(0.45, 2.75, 1.72);
+    board(2.6, 1.1, d.x, d.y, d.z - 0.02, Math.PI);
+  });
+}
+function setupSlipper(g){
+  const proto = normalizeModel(g.scene, 0.3);
+  proto.traverse(o => { if(o.isMesh){ o.castShadow = true; o.material = o.material.clone(); o.material.emissive = GOLD.clone(); o.material.emissiveIntensity = 0.0; } });
+  BIM.slipperProto = proto;
+  const show = proto.clone(); show.scale.multiplyScalar(1.8);
+  show.traverse(o => { if(o.isMesh){ o.material = o.material.clone(); o.material.emissive = GOLD.clone(); o.material.emissiveIntensity = 0.35; SLIPPER_SHOW.mats = (SLIPPER_SHOW.mats||[]).concat(o.material); } });
+  SLIPPER_SHOW.g.add(show);
+  const hold = proto.clone(); hold.traverse(o => { if(o.isMesh){ o.material = o.material.clone(); o.material.emissiveIntensity = 0.15; } });
+  THROW.slipper.add(hold); hold.rotation.set(-0.5, 0.6, 0.2);
+}
+function setupEggBox(g){
+  const box = normalizeModel(g.scene, 0.4);
+  const it = BIM.items.find(i => i.kind === 'egg');
+  box.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(box);
+  box.position.set(it.at.x, it.at.y - bb.min.y + 0.01, it.at.z); box.rotation.y = 0.4;
+  box.traverse(o => { if(o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(box);
+}
+
+/* Held item for keys 4 and 5 (no arm rig for these, the item sits in the lower right) */
+const THROW = {g:new THREE.Group(), egg:new THREE.Group(), slipper:new THREE.Group()};
+{
+  const e = new THREE.Mesh(eggGeo, eggMat); e.scale.setScalar(1.6); THROW.egg.add(e);
+  THROW.g.add(THROW.egg, THROW.slipper); THROW.g.visible = false; wScene.add(THROW.g);
+  const halo = makeGlowSprite(0.35, 0.35); THROW.slipper.add(halo);
+}
+function poseThrowable(dt, drop, bx, by, sk){
+  const show = (P.weapon === 4 || P.weapon === 5) && P.alive && !P.boat;
+  THROW.g.visible = show; if(!show) return;
+  THROW.egg.visible = P.weapon === 4 && P.eggs > 0; THROW.slipper.visible = P.weapon === 5 && P.slippers > 0;
+  P.throwT = Math.max(0, P.throwT - dt);
+  const k = P.throwT > 0 ? P.throwT/0.45 : 0;                      // 1 -> 0 over the throw
+  const wind = k > 0.6 ? (1 - k)/0.4 : k/0.6;                     // arm comes back then whips forward
+  const tt = t => t*t*(3 - 2*t);
+  THROW.g.position.set(0.13 + bx + P.swayX - sk*0.03, -0.135 + by + P.swayY - drop*0.4 + (k > 0 ? tt(wind)*0.1 : 0), -0.36 - (k > 0 && k <= 0.6 ? (1 - k/0.6)*0.25 : 0));
+  THROW.g.rotation.set(-0.2 - drop + (k > 0.6 ? -tt(wind)*0.8 : 0), -0.3, 0.1);
+  if(k > 0 && k < 0.5) THROW.g.visible = false;                   // it's in the air
+  THROW.slipper.rotation.y += dt*1.2;
+}
+
+/* Projectiles: mine are simulated here; remote ones are drawn from their state */
+const PROJ = [];
+let projSeq = 0;
+function makeProjMesh(type){
+  if(type === 0){ const m = new THREE.Mesh(eggGeo, eggMat); m.castShadow = true; return m; }
+  const g = new THREE.Group();
+  if(BIM.slipperProto){ const s = BIM.slipperProto.clone(); s.traverse(o => { if(o.isMesh){ o.material = o.material.clone(); o.material.emissiveIntensity = 0.5; } }); g.add(s); }
+  else g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.3), new THREE.MeshStandardMaterial({color:0x2b6cd4})));
+  g.add(makeGlowSprite(0.9, 0.55));
+  const l = new THREE.PointLight(0xffb52e, 1.2, 5, 2); g.add(l);
+  return g;
+}
+function pickSlipperTarget(){
+  // whoever is closest to the crosshair; otherwise the nearest enemy anywhere
+  const o = camera.position, f = new V3(0,0,-1).applyQuaternion(camera.quaternion);
+  let best = null, bestScore = Infinity;
+  const consider = (pos, ref) => {
+    const c = pos.clone().setY(pos.y + 1.1), d = c.clone().sub(o), dist = d.length();
+    const ang = Math.acos(clamp(d.dot(f)/Math.max(dist, 1e-3), -1, 1));
+    const score = ang < 0.5 ? ang*10 + dist*0.01 : 100 + dist;
+    if(score < bestScore){ bestScore = score; best = ref; }
+  };
+  for(const r of remotes.values()) if(r.alive) consider(r.cur, {kind:'peer', r});
+  if(botsOn) for(const b of bots) if(b.alive) consider(b.pos, {kind:'bot', b});
+  return best;
+}
+function targetPos(tg){
+  if(!tg) return null;
+  if(tg.kind === 'peer'){ if(!remotes.has(tg.r.peer) || !tg.r.alive) return null; return tg.r.cur.clone().setY(tg.r.cur.y + (tg.r.crouch ? 0.8 : 1.15)); }
+  if(!tg.b.alive) return null; return tg.b.pos.clone().setY(tg.b.pos.y + 1.15);
+}
+function throwItem(t){
+  const f = new V3(0,0,-1).applyQuaternion(camera.quaternion), r = new V3(1,0,0).applyQuaternion(camera.quaternion);
+  const start = camera.position.clone().addScaledVector(f, 0.55).addScaledVector(r, 0.18).add(new V3(0, -0.12, 0));
+  if(P.weapon === 4){
+    if(P.eggs <= 0) return;
+    P.eggs--;
+    const vel = f.clone().multiplyScalar(24).add(new V3(0, 1.4, 0)).add(P.vel.clone().multiplyScalar(0.5));
+    PROJ.push({id:++projSeq, type:0, pos:start, vel, life:4, mesh:null});
+    whoosh(0.5, 0.2);
+  } else {
+    if(P.slippers <= 0) return;
+    const tg = pickSlipperTarget();
+    if(!tg){ banner('No target', 'Nobody to throw the slipper at'); return; }
+    P.slippers--;
+    PROJ.push({id:++projSeq, type:1, pos:start, vel:f.clone().multiplyScalar(12).add(new V3(0, 3, 0)), life:90, mesh:null, tg, spin:0});
+    const name = tg.kind === 'peer' ? tg.r.name : tg.b.name;
+    banner('Slipper away', 'Locked on ' + name); whoosh(0.9, 0.2);
+  }
+  P.throwT = 0.45; P.nextShot = t + 0.55; netDirty = true;
+  if((P.weapon === 4 && P.eggs <= 0) || (P.weapon === 5 && P.slippers <= 0)) setTimeout(() => { if(P.alive && (P.weapon === 4 || P.weapon === 5)) switchWeapon(2); }, 500);
+}
+function charHit(p0, p1, feet, crouch){
+  // distance from the flight segment to the body (a vertical segment), roughly a capsule test
+  const top = crouch ? 1.2 : 1.75, a = feet.clone().setY(feet.y + 0.3), b = feet.clone().setY(feet.y + top - 0.15);
+  let best = Infinity;
+  for(let i=0;i<=6;i++){
+    const q = p0.clone().lerp(p1, i/6);
+    const y = clamp(q.y, a.y, b.y);
+    best = Math.min(best, Math.hypot(q.x - feet.x, q.y - y, q.z - feet.z));
+  }
+  return best < 0.42;
+}
+function splatSound(at){ if(!AC) return; const sp = spatial(at); const t = AC.currentTime, out = outNode(Math.min(1, 5/(sp.d + 2)), sp.pan); noiseBurst(out, t, 'lowpass', 900, 0, 0.5, 0.18, 0.004); noiseBurst(out, t + 0.02, 'bandpass', 2400, 2, 0.3, 0.1, 0.003); }
+function thwack(at){ if(!AC) return; const sp = spatial(at); const t = AC.currentTime, out = outNode(Math.min(1, 6/(sp.d + 2)), sp.pan); noiseBurst(out, t, 'bandpass', 1500, 1.5, 0.9, 0.12, 0.002); thud(0.6, 90); }
+function updateProjectiles(dt, t){
+  for(let i = PROJ.length - 1; i >= 0; i--){
+    const p = PROJ[i];
+    if(!p.mesh){ p.mesh = makeProjMesh(p.type); scene.add(p.mesh); }
+    p.life -= dt;
+    let done = p.life <= 0;
+    const p0 = p.pos.clone();
+    if(p.type === 0){
+      p.vel.y -= 14*dt;
+      p.pos.addScaledVector(p.vel, dt);
+      const seg = p.pos.clone().sub(p0), len = seg.length();
+      // people first, then walls and ground
+      let hit = null;
+      for(const r of remotes.values()) if(r.alive && charHit(p0, p.pos, r.cur, r.crouch)){ hit = {r}; break; }
+      if(!hit && botsOn) for(const b of bots) if(b.alive && charHit(p0, p.pos, b.pos, false)){ hit = {b}; break; }
+      if(hit){
+        if(hit.r){ myHits.push([++hitSeq, hit.r.peer, 0, 0, 4]); if(myHits.length > 8) myHits.shift(); netDirty = true; }
+        else { hit.b.blindUntil = t + 4; hit.b.alertUntil = t + 4; }
+        puff('dust', p.pos, new V3(0,1,0), 10, 2, 0.12, 0.5, 3); splatSound(p.pos); hitmarker(false, false);
+        banner('Egged ' + (hit.r ? hit.r.name : hit.b.name), 'Blinded for 4 s');
+        done = true;
+      } else if(len > 0){
+        const w = rayWorld(p0, seg.clone().divideScalar(len), len);
+        if(w.t < len){ const at = p0.clone().addScaledVector(seg, w.t/len); eggDecal(at, w.n); splatSound(at); done = true; }
+      }
+      p.mesh.position.copy(p.pos); p.mesh.rotation.x += dt*9;
+    } else {
+      const tp = targetPos(p.tg);
+      if(!tp){ done = true; puff('dust', p.pos, new V3(0,1,0), 12, 1.5, 0.25, 0.8, 1); }
+      else {
+        // homing: steer toward the target, faster the longer it flies; passes through anything
+        const speed = Math.min(26, 13 + (90 - p.life)*1.2);
+        const want = tp.clone().sub(p.pos); const dist = want.length();
+        want.normalize().multiplyScalar(speed);
+        p.vel.lerp(want, Math.min(1, dt*(dist < 6 ? 9 : 3.5)));
+        p.pos.addScaledVector(p.vel, dt);
+        if(p.pos.distanceTo(tp) < 0.7){
+          if(p.tg.kind === 'peer'){ myHits.push([++hitSeq, p.tg.r.peer, 150, 0, 3]); if(myHits.length > 8) myHits.shift(); netDirty = true; hitmarker(true, false); }
+          else { const killed = damageBot(p.tg.b, 999, false, SLIPPER_NAME, t); hitmarker(killed, false); }
+          thwack(tp); puff('dust', tp, new V3(0,1,0), 14, 2.5, 0.2, 0.6, 2);
+          done = true;
+        }
+      }
+      p.spin += dt*Math.PI*2*2.6;                                   // full 360° turns as it flies
+      p.mesh.position.copy(p.pos);
+      p.mesh.rotation.set(0, p.spin, 0.35);
+      if(Math.random() < dt*25) puff('spark', p.pos, new V3(0,1,0), 1, 0.6, 0.05, 0.25, 0);
+    }
+    if(done){ scene.remove(p.mesh); PROJ.splice(i, 1); netDirty = true; }
+  }
+}
+// remote players' eggs and slippers
+function updateRemoteProj(r, list, dt){
+  r.pjm = r.pjm || new Map();
+  const seen = new Set();
+  for(const it of list){
+    if(!Array.isArray(it) || it.length < 5) continue;
+    const id = num(it[0],0), type = num(it[1],0) ? 1 : 0;
+    const pos = new V3(num(it[2],0), num(it[3],0), num(it[4],0));
+    seen.add(id);
+    let e = r.pjm.get(id);
+    if(!e){ e = {mesh:makeProjMesh(type), type, tgt:pos.clone(), spin:0}; e.mesh.position.copy(pos); scene.add(e.mesh); r.pjm.set(id, e); }
+    e.tgt.copy(pos);
+  }
+  for(const [id, e] of r.pjm) if(!seen.has(id)){ scene.remove(e.mesh); r.pjm.delete(id); if(e.type === 0) splatSound(e.mesh.position); else thwack(e.mesh.position); }
+}
+function tickRemoteProj(dt){
+  for(const r of remotes.values()){
+    if(!r.pjm) continue;
+    for(const e of r.pjm.values()){
+      e.mesh.position.lerp(e.tgt, Math.min(1, dt*12));
+      if(e.type === 1){ e.spin += dt*Math.PI*2*2.6; e.mesh.rotation.set(0, e.spin, 0.35); } else e.mesh.rotation.x += dt*9;
+    }
+  }
+}
+function clearRemoteProj(r){ if(r && r.pjm){ for(const e of r.pjm.values()) scene.remove(e.mesh); r.pjm.clear(); } }
+// yolk on walls
+const yolkTex = canvasTex(128, (g, s) => {
+  g.clearRect(0,0,s,s);
+  g.fillStyle = 'rgba(250,246,230,.85)'; g.beginPath();
+  for(let i=0;i<=24;i++){ const a = i/24*Math.PI*2, r = s*(0.3 + Math.random()*0.16); g.lineTo(s/2 + Math.cos(a)*r, s/2 + Math.sin(a)*r); } g.fill();
+  const gr = g.createRadialGradient(s*0.46,s*0.44,2,s/2,s/2,s*0.16); gr.addColorStop(0,'#ffd34d'); gr.addColorStop(1,'#f19a00');
+  g.fillStyle = gr; g.beginPath(); g.arc(s/2, s/2, s*0.15, 0, 7); g.fill();
+});
+function eggDecal(at, n){
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.45), new THREE.MeshBasicMaterial({map:yolkTex, transparent:true, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-4}));
+  m.position.copy(at).addScaledVector(n, 0.02); m.lookAt(at.clone().add(n)); m.rotateZ(Math.random()*6.28); scene.add(m);
+  setTimeout(() => scene.remove(m), 20000);
+}
+
+/* Getting egged: yolk and white over your screen for 4 s, then it slides off */
+let eggSplatT = 0;
+function eggSVG(){
+  const blob = (cx, cy, r, n, jit) => { let d = ''; for(let i=0;i<=n;i++){ const a = i/n*Math.PI*2, rr = r*(1 + (Math.sin(a*3 + jit)*0.12 + Math.sin(a*5 + jit*2)*0.08 + (Math.random()-0.5)*0.16)); d += (i ? 'L' : 'M') + (cx + Math.cos(a)*rr).toFixed(1) + ' ' + (cy + Math.sin(a)*rr).toFixed(1); } return d + 'Z'; };
+  const drips = (cx, cy, r) => { let s = ''; for(let i=0;i<5;i++){ const x = cx + (Math.random()-0.5)*r*1.4, w = 10 + Math.random()*22, h = r*(0.5 + Math.random()*1.1); s += `<path d="M${x-w/2} ${cy} L${x+w/2} ${cy} L${x+w*0.35} ${cy+h} Q${x} ${cy+h+w} ${x-w*0.35} ${cy+h} Z" fill="url(#ew)"/>`; } return s; };
+  const big = {x:700 + Math.random()*200, y:380 + Math.random()*120, r:330}, sm = {x:300 + Math.random()*1000, y:200 + Math.random()*400, r:150};
+  let shells = ''; for(let i=0;i<9;i++){ const x = big.x + (Math.random()-0.5)*700, y = big.y + (Math.random()-0.5)*500, s = 10 + Math.random()*18, a = Math.random()*360; shells += `<path transform="translate(${x} ${y}) rotate(${a})" d="M0 0 L${s} ${s*0.2} L${s*0.7} ${s} L${-s*0.2} ${s*0.6} Z" fill="#efe2c8" stroke="#cdbb98" stroke-width="1.5"/>`; }
+  return `<svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"><defs>
+    <radialGradient id="ew" cx="45%" cy="40%" r="65%"><stop offset="0" stop-color="#fffdf3" stop-opacity=".93"/><stop offset=".7" stop-color="#f4eed8" stop-opacity=".86"/><stop offset="1" stop-color="#e2d8b8" stop-opacity=".75"/></radialGradient>
+    <radialGradient id="ey" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#ffe066"/><stop offset=".55" stop-color="#ffb000"/><stop offset="1" stop-color="#e07800"/></radialGradient>
+    <filter id="es"><feGaussianBlur stdDeviation="3"/></filter></defs>
+    <g filter="url(#es)"><path d="${blob(big.x, big.y, big.r, 40, Math.random()*6)}" fill="url(#ew)"/>${drips(big.x, big.y + big.r*0.6, big.r)}
+    <path d="${blob(sm.x, sm.y, sm.r, 28, Math.random()*6)}" fill="url(#ew)"/></g>
+    <path d="${blob(big.x + 30, big.y - 10, 120, 28, 1)}" fill="url(#ey)"/>
+    <ellipse cx="${big.x - 10}" cy="${big.y - 55}" rx="45" ry="24" fill="#fff" opacity=".75"/>
+    <path d="${blob(sm.x, sm.y, 52, 20, 2)}" fill="url(#ey)"/>
+    <ellipse cx="${sm.x - 12}" cy="${sm.y - 20}" rx="18" ry="9" fill="#fff" opacity=".7"/>
+    <ellipse cx="${big.x + 140}" cy="${big.y - 150}" rx="70" ry="22" fill="#fff" opacity=".35" transform="rotate(-25 ${big.x + 140} ${big.y - 150})"/>
+    ${shells}</svg>`;
+}
+function eggSplat(from){
+  const el = $('eggSplat');
+  el.innerHTML = eggSVG();
+  el.style.transition = 'none'; el.style.transform = 'translateY(0) scale(1.15)'; el.style.opacity = '1';
+  void el.offsetWidth;
+  el.style.transition = 'transform .18s cubic-bezier(.2,1.6,.5,1)'; el.style.transform = 'translateY(0) scale(1)';
+  eggSplatT = 4;
+  banner('Egged!', (from || 'Someone') + ' threw an egg at you');
+  if(AC){ const t = AC.currentTime, out = outNode(0.9, 0); noiseBurst(out, t, 'lowpass', 700, 0, 0.9, 0.22, 0.003); noiseBurst(out, t + 0.03, 'bandpass', 2600, 2, 0.5, 0.14, 0.003); }
+}
+function tickEggSplat(dt){
+  if(eggSplatT <= 0) return;
+  eggSplatT -= dt;
+  if(eggSplatT <= 0){
+    const el = $('eggSplat');
+    el.style.transition = 'transform 1.6s cubic-bezier(.55,0,.75,.3), opacity 1.6s ease-in';
+    el.style.transform = 'translateY(70%)'; el.style.opacity = '0';
+  }
+}
+function clearEggSplat(){ eggSplatT = 0; const el = $('eggSplat'); el.style.transition = 'none'; el.style.opacity = '0'; }
+
+/* Buying */
+let shopFocus = null;
+const shopPrompt = $('shopPrompt');
+function shopTick(){
+  let f = null;
+  if(deployed && P.alive && !P.boat && !paused){
+    // the item you're closest to and looking at
+    let bs = Infinity; const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw);
+    for(const it of BIM.items){
+      const dx = it.pos.x - P.pos.x, dz = it.pos.z - P.pos.z, d = Math.hypot(dx, dz);
+      if(d > 1.9) continue;
+      const sc = d*(1.7 - (dx*fx + dz*fz)/Math.max(d, 0.01));
+      if(sc < bs){ bs = sc; f = it; }
+    }
+  }
+  if(f !== shopFocus || (f && shopPrompt.dataset.c !== String(P.coins))){
+    shopFocus = f; shopPrompt.hidden = !f;
+    if(f){
+      const can = P.coins >= f.price;
+      shopPrompt.dataset.c = String(P.coins);
+      shopPrompt.classList.toggle('no', !can);
+      shopPrompt.innerHTML = can ? `<div><kbd>E</kbd> Buy ${f.name} · <span class="coin"></span>${f.price}</div><small>${f.note}</small>`
+        : `<div>${f.name} · <span class="coin"></span>${f.price}</div><small>Need ${f.price} coins · you have ${P.coins} · 1 coin per kill</small>`;
+    }
+  }
+}
+function tryBuy(){
+  if(!shopFocus || !P.alive) return false;
+  const it = shopFocus;
+  if(P.coins < it.price){ banner('Not enough coins', `${it.name} costs ${it.price} · you have ${P.coins}`); click(400, 0.4, 0.08); return true; }
+  P.coins -= it.price;
+  if(it.kind === 'egg'){ P.eggs += EGGS_PER_BOX; banner('Egg box', `${P.eggs} eggs · press 4 to throw`); switchWeapon(4); }
+  else { P.slippers++; banner('Legendary: BIM Slipper', 'Press 5 · it hunts down whoever you throw it at'); switchWeapon(5); }
+  if(AC){ const t = AC.currentTime; click(1800, 0.4, 0.05); click(2400, 0.35, 0.05, 0.08); const o = AC.createOscillator(); o.type = 'sine'; o.frequency.value = 1320; const g = AC.createGain(); g.gain.setValueAtTime(0.18, t + 0.16); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9); o.connect(g); g.connect(master); o.start(t + 0.16); o.stop(t + 1); }
+  shopFocus = null;
+  return true;
+}
+function earnCoin(){
+  P.coins++;
+  const el = $('coinN'); el.textContent = P.coins;
+  const box = $('coins'); box.classList.remove('pop'); void box.offsetWidth; box.classList.add('pop');
+}
+function ownsWeapon(w){ return w === 4 ? P.eggs > 0 : w === 5 ? P.slippers > 0 : w >= 1 && w <= 3; }
+function cycleWeapon(dir){
+  let w = P.nextWeapon;
+  for(let i=0;i<5;i++){ w = ((w - 1 + dir + 5) % 5) + 1; if(ownsWeapon(w)) break; }
+  switchWeapon(w);
+}
+// the display slipper bobs, spins and pulses
+function bimTick(dt, t){
+  const g = SLIPPER_SHOW.g;
+  g.rotation.y += dt*1.4; g.position.y = 1.42 + Math.sin(t*2)*0.06;
+  const pulse = 0.5 + 0.5*Math.sin(t*3.2);
+  if(SLIPPER_SHOW.mats) for(const m of SLIPPER_SHOW.mats) m.emissiveIntensity = 0.12 + pulse*0.3;
+  SLIPPER_SHOW.light.intensity = 1.2 + pulse*0.9;
+  SLIPPER_SHOW.halo.position.copy(g.position); SLIPPER_SHOW.halo.material.opacity = 0.22 + pulse*0.22; SLIPPER_SHOW.halo.scale.setScalar(1.2 + pulse*0.35);
+  SLIPPER_SHOW.beam.material.opacity = 0.08 + pulse*0.08;
+  const pos = SLIPPER_SHOW.sparks.geometry.attributes.position;
+  for(let i=0;i<pos.count;i++){ let y = pos.getY(i) + dt*(0.35 + (i%5)*0.08); if(y > 2.8) y = 1.1; pos.setY(i, y); }
+  pos.needsUpdate = true;
+}
+
 /* ---------------- Main loop ---------------- */
 let last = now(), presenceTick = 0;
 function update(dt, t){
@@ -2557,6 +3019,7 @@ function update(dt, t){
   if(P.boat){ /* hands on the tiller */ }
   else if(P.weapon === 1){ if(firing && P.alive && P.melee <= 0 && P.switchT <= 0 && t >= P.meleeCd && !paused) startMelee(t); }
   else if(P.weapon === 3){ /* bolt action: see sniperTick */ }
+  else if(P.weapon >= 4){ if(firing && P.alive && P.switchT <= 0 && !paused && !P.boat && t >= P.nextShot){ firing = false; throwItem(t); } }
   else if(firing && P.alive && P.reload <= 0 && P.melee <= 0 && P.switchT <= 0 && !paused){
     if(P.sprint) P.sprint = false;
     let n = 0;
@@ -2565,6 +3028,8 @@ function update(dt, t){
   }
   if(P.alive && P.weapon === 2 && P.mag === 0 && P.reserve > 0 && P.reload <= 0 && !firing) startReload();
   sniperTick(dt, t);
+  updateProjectiles(dt, t); tickRemoteProj(dt); tickEggSplat(dt); shopTick();
+  if(PROJ.length) netDirty = true;
   // Regen
   if(P.alive && t - P.lastDmg > 5 && P.hp < 100) P.hp = Math.min(100, P.hp + 12*dt);
 
@@ -2644,7 +3109,7 @@ function update(dt, t){
   gunRoot.rotation.set(rx, ry, rz);
   if(ARMS){
     gunRoot.visible = false;
-    const show = !knifeOut && P.alive && !P.boat && P.weapon !== 3;
+    const show = !knifeOut && P.alive && !P.boat && P.weapon !== 3 && P.weapon < 4;
     ARMS.vm.visible = show;
     if(ARMS.cur && ARMS.cur.getClip().name === 'INSPEC' && (adsHeld || firing)) armsToIdle(0.15);
     ARMS.mixer.update(dt);
@@ -2674,7 +3139,8 @@ function update(dt, t){
   }
 
   if(SNIPER) poseSniper(dt, (P.switchT > 0 && P.weapon === 3 && P.switchT <= SWITCH_TIME/2) ? 0 : drop, bx, by, sk);
-  if(P.weapon === 3) gunRoot.visible = false;
+  if(P.weapon >= 3) gunRoot.visible = false;
+  poseThrowable(dt, (P.switchT > 0 && P.switchT <= SWITCH_TIME/2) ? 0 : drop, bx, by, sk);
 
   // Sky follows camera; shadow box follows player
   sky.position.copy(camera.position);
@@ -2687,6 +3153,7 @@ function frame(){
   requestAnimationFrame(frame);
   const t = now(); const dt = Math.min(0.05, t - last); last = t;
   seaTick(dt);
+  bimTick(dt, t);
   if(deployed) update(dt, t);
   else {
     // Idle flyover behind the menu

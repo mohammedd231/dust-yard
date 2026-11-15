@@ -19,3 +19,7 @@ WASD move · mouse aim · E get in/out of the rowing boat (W paddle, A/D steer, 
 W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam / chase) · R reset to track · Esc pause. Gamepad triggers + left stick work too.
 - Boat: "Boat" by KamillaKraus (https://sketchfab.com/KamillaKraus), CC BY 4.0. Texture recompressed and mesh simplified for the web.
 - Sniper rifle with arms and animations: "sniper animated" by DJMaesen (https://sketchfab.com/bumstrum), CC BY 4.0. Textures recompressed for the web.
+- Market: "Mini market" by Pasha (https://sketchfab.com/Pasha.), CC BY 4.0. Simplified, relettered as a BIM.
+- Slipper: "BOM SLIPPER" by berkayege (https://sketchfab.com/berkayege), CC BY 4.0.
+- Egg box: "Egg box" by Antoine Dresen (https://sketchfab.com/adresen), CC BY 4.0. Simplified for the web.
+- BIM name and logo belong to BİM Birleşik Mağazalar A.Ş.; used here in a private fan game among friends.
