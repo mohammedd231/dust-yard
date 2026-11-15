@@ -3048,14 +3048,12 @@ function heliSound(on){
     const lfoG = AC.createGain(); lfoG.gain.value = 0.5; lfo.connect(lfoG); lfoG.connect(chop.gain);
     const vol = AC.createGain(); vol.gain.value = 0.0001;
     n.connect(lp); lp.connect(chop); chop.connect(vol); vol.connect(master);
-    const tw = AC.createOscillator(); tw.type = 'triangle'; tw.frequency.value = 400;
-    const twG = AC.createGain(); twG.gain.value = 0.0001; tw.connect(twG); twG.connect(master);
-    n.start(t); lfo.start(t); tw.start(t);
-    HELI.audio = {n, lp, chop, lfo, vol, tw, twG};
+    n.start(t); lfo.start(t);
+    HELI.audio = {n, lp, chop, lfo, vol};
   } else if(!on && HELI.audio){
     const a = HELI.audio; HELI.audio = null; const t = AC.currentTime;
-    a.vol.gain.setTargetAtTime(0.0001, t, 0.4); a.twG.gain.setTargetAtTime(0.0001, t, 0.4);
-    setTimeout(() => { try{ a.n.stop(); a.lfo.stop(); a.tw.stop(); }catch(e){} }, 2500);
+    a.vol.gain.setTargetAtTime(0.0001, t, 0.4);
+    setTimeout(() => { try{ a.n.stop(); a.lfo.stop(); }catch(e){} }, 2500);
   }
 }
 function flyHeli(dt){
@@ -3086,8 +3084,6 @@ function flyHeli(dt){
     HELI.audio.lfo.frequency.setTargetAtTime(4 + r*17, t, 0.2);
     HELI.audio.vol.gain.setTargetAtTime(0.03 + r*0.42*load, t, 0.15);
     HELI.audio.lp.frequency.setTargetAtTime(250 + r*450*load, t, 0.15);
-    HELI.audio.tw.frequency.setTargetAtTime(300 + r*900, t, 0.3);
-    HELI.audio.twG.gain.setTargetAtTime(0.006 + r*0.03, t, 0.3);
   }
 }
 function moveHeli(dt, dh){
@@ -3144,7 +3140,7 @@ function heliTick(dt, t){
   // others hear it too, quieter with distance
   if(!P.heli){
     const d = camera.position.distanceTo(HELI.g.position);
-    if(HELI.rotor > 0.05 && d < 160){ heliSound(true); if(HELI.audio){ const at = AC.currentTime, v = HELI.rotor*Math.min(1, 18/(d + 6)); HELI.audio.vol.gain.setTargetAtTime(0.02 + v*0.4, at, 0.2); HELI.audio.lfo.frequency.setTargetAtTime(4 + HELI.rotor*17, at, 0.2); HELI.audio.lp.frequency.setTargetAtTime(250 + HELI.rotor*400, at, 0.2); HELI.audio.twG.gain.setTargetAtTime(v*0.02, at, 0.2); } }
+    if(HELI.rotor > 0.05 && d < 160){ heliSound(true); if(HELI.audio){ const at = AC.currentTime, v = HELI.rotor*Math.min(1, 18/(d + 6)); HELI.audio.vol.gain.setTargetAtTime(0.02 + v*0.4, at, 0.2); HELI.audio.lfo.frequency.setTargetAtTime(4 + HELI.rotor*17, at, 0.2); HELI.audio.lp.frequency.setTargetAtTime(250 + HELI.rotor*400, at, 0.2); } }
     else heliSound(false);
   }
   const near = deployed && P.alive && !P.heli && !P.boat && !paused && heliDist(P.pos) < 4.5 && Math.abs(P.pos.y - HELI.y) < 3 && !(HELI.driver && HELI.driver !== myId);
