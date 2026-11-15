@@ -183,6 +183,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
   <div class="coins" id="coins" title="Coins: 1 per kill"><span class="coin"></span><b id="coinN">0</b><small>coins</small></div>
   <div class="boatp shopp" id="shopPrompt" hidden></div>
   <div class="boatp" id="heliPrompt" hidden><kbd>E</kbd> Fly the helicopter</div>
+  <div class="boatp" id="jetPrompt" hidden><kbd>E</kbd> Ride the jet ski</div>
   <div class="scope" id="scope"><div class="lens"><svg viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
     <g fill="#000" stroke="none"><rect x="0" y="98.4" width="62" height="3.2"/><rect x="138" y="98.4" width="62" height="3.2"/><rect x="98.4" y="138" width="3.2" height="62"/><rect x="98.4" y="0" width="3.2" height="62"/></g>
     <g stroke="#000" stroke-width="0.45"><line x1="62" y1="100" x2="138" y2="100"/><line x1="100" y1="62" x2="100" y2="138"/></g>
@@ -247,6 +248,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
       <dt>Shift · C · Space</dt><dd>Sprint · crouch · jump</dd>
       <dt>3</dt><dd>Sniper · right click looks through the scope</dd>
       <dt>E</dt><dd>Get in / out of the rowing boat · buy at BIM</dd>
+      <dt>Jet ski</dt><dd>E at the jetty · W throttle · S brake · A/D steer</dd>
       <dt>Heli</dt><dd>E at the helipad · Space up · C down · W/S fly · A/D turn</dd>
       <dt>4 · 5</dt><dd>Eggs and the BIM slipper (buy with coins, 1 per kill)</dd>
       <dt>Tab</dt><dd>Hold for scoreboard</dd>
@@ -1453,6 +1455,12 @@ function updateRemote(r, pr, first){
   r.wp = pr.wp === 1 ? 1 : 2;
   r.yawT = num(pr.ry,0); r.pitchT = clamp(num(pr.rx,0),-1.5,1.5); r.crouch = !!pr.cr;
   updateRemoteProj(r, Array.isArray(pr.pj) ? pr.pj.slice(0, 8) : []);
+  const jc = Array.isArray(pr.jc) && pr.jc.length === 3 ? pr.jc.map(v => num(v, 0)) : null;
+  if(jc && !P.jet){ JET.tx = clamp(jc[0], 50, 300); JET.tz = clamp(jc[1], -230, 230); JET.th = jc[2]; if(!JET.hasT){ JET.x = JET.tx; JET.z = JET.tz; JET.h = JET.th; } JET.hasT = true; JET.driver = r.peer; r.onJet = true; }
+  else if(!jc && r.onJet){ r.onJet = false; if(JET.driver === r.peer){ JET.driver = null; JET.hasT = false; JET.v = 0; } }
+  if(!jc && !P.jet && !JET.driver && Array.isArray(pr.jp) && pr.jp.length === 4 && num(pr.jp[3],0) > JET.stamp){
+    const jp = pr.jp.map(v => num(v, 0)); JET.x = clamp(jp[0], 50, 300); JET.z = clamp(jp[1], -230, 230); JET.h = jp[2]; JET.stamp = jp[3];
+  }
   const hc = Array.isArray(pr.hc) && pr.hc.length === 4 ? pr.hc.map(v => num(v, 0)) : null;
   if(hc && !P.heli){ HELI.tx = clamp(hc[0], -200, 300); HELI.ty = clamp(hc[1], -3, 150); HELI.tz = clamp(hc[2], -230, 230); HELI.th = hc[3]; if(!HELI.hasT){ HELI.x = HELI.tx; HELI.y = HELI.ty; HELI.z = HELI.tz; HELI.h = HELI.th; } HELI.hasT = true; HELI.driver = r.peer; r.inHeli = true; }
   else if(!hc && r.inHeli){ r.inHeli = false; if(HELI.driver === r.peer){ HELI.driver = null; HELI.hasT = false; HELI.vx = HELI.vy = HELI.vz = 0; } }
@@ -1477,10 +1485,13 @@ function sendPresence(t){
   if(P.boat) payload.bt = [r2(BOAT.x), r2(BOAT.z), r3(BOAT.h)];
   payload.hp = [r2(HELI.x), r2(HELI.y), r2(HELI.z), r3(HELI.h), HELI.stamp];
   if(P.heli) payload.hc = [r2(HELI.x), r2(HELI.y), r2(HELI.z), r3(HELI.h)];
+  payload.jp = [r2(JET.x), r2(JET.z), r3(JET.h), JET.stamp];
+  if(P.jet) payload.jc = [r2(JET.x), r2(JET.z), r3(JET.h)];
   if(PROJ.length) payload.pj = PROJ.slice(-6).map(q => [q.id, q.type, r2(q.pos.x), r2(q.pos.y), r2(q.pos.z)]);
   try{ const p = game.send({type:'broadcast', event:'st', payload}); if(p && p.catch) p.catch(()=>{}); }catch(e){}
 }
 function updateRemotes(dt){
+  if(JET.driver && JET.driver !== myId && !remotes.has(JET.driver)){ JET.driver = null; JET.hasT = false; }
   if(HELI.driver && HELI.driver !== myId && !remotes.has(HELI.driver)){ HELI.driver = null; HELI.hasT = false; }
   if(BOAT.driver && BOAT.driver !== myId && !remotes.has(BOAT.driver)){ BOAT.driver = null; BOAT.hasT = false; }
   const camPos = camera.position, t = now();
@@ -1949,7 +1960,7 @@ function setupSniper(g){
 }
 // place the sniper viewmodel: hip pose, or looking down the scope axis when aiming
 function poseSniper(dt, drop, bx, by, sk){
-  const S = SNIPER, show = P.weapon === 3 && P.alive && !(P.boat || P.heli) && P.ads < 0.92;
+  const S = SNIPER, show = P.weapon === 3 && P.alive && !(P.boat || P.heli || P.jet) && P.ads < 0.92;
   S.vm.visible = show;
   if(!show){ S.flash.visible = false; return; }
   S.mixer.update(dt);
@@ -1984,6 +1995,7 @@ function applyDamage(dmg, src, hs, wcode){
     P.hp = 0; P.alive = false; P.d++; P.ds++; P.kb = src.kind==='peer' ? src.id : ''; P.kbHs = hs?1:0; P.kw = isKnife ? 'knife' : isSniper ? 'sniper' : isSlipper ? 'slipper' : 'ak'; P.melee = 0; knife.visible = false;
     if(P.boat) exitBoat(true);
     if(P.heli) exitHeli(true);
+    if(P.jet) exitJet(true);
     P.deathAt = t; P.respawnAt = t + 3; P.reload = 0; firing = false; P.vel.set(0,P.vel.y,0);
     if(src.bot) src.bot.k++;
     killerName = src.name; killerHs = hs; P.killerKnife = !!isKnife;
@@ -2056,7 +2068,11 @@ function updateHUD(dt, t){
   $('slot4').hidden = P.eggs <= 0; $('slot4').textContent = '4 Eggs ×' + P.eggs; $('slot4').classList.toggle('on', P.nextWeapon === 4);
   $('slot5').hidden = P.slippers <= 0; $('slot5').classList.toggle('on', P.nextWeapon === 5);
   $('wpnLbl').classList.toggle('legend', slp);
-  if(P.heli){
+  if(P.jet){
+    $('mag').textContent = Math.round(Math.abs(JET.speed)*3.6); $('mag').classList.remove('low'); $('res').textContent = 'km/h';
+    $('wpnLbl').textContent = 'Jet ski'; $('reloadHint').hidden = true;
+  }
+  else if(P.heli){
     $('mag').textContent = Math.round(Math.hypot(HELI.vx, HELI.vz)*3.6); $('mag').classList.remove('low'); $('res').textContent = 'km/h';
     $('wpnLbl').textContent = 'EC135 · altitude ' + Math.max(0, Math.round(HELI.y - heliGroundAt(HELI.x, HELI.z, HELI.y))) + ' m' + (HELI.rotor < 0.85 ? ' · rotor ' + Math.round(HELI.rotor*100) + '%' : '');
     $('reloadHint').hidden = true;
@@ -2069,11 +2085,11 @@ function updateHUD(dt, t){
     $('reloadHint').hidden = kn || !(P.alive && P.reload <= 0 && P.mag <= 7 && P.reserve > 0);
     if(P.reload > 0){ $('reloadHint').hidden = false; $('reloadHint').textContent = 'Reloading…'; } else $('reloadHint').textContent = 'Press R to reload';
   }
-  const scoped = sn && P.alive && P.ads > 0.92 && !(P.boat || P.heli);
+  const scoped = sn && P.alive && P.ads > 0.92 && !(P.boat || P.heli || P.jet);
   $('scope').style.opacity = scoped ? 1 : 0;
   const gap = P.weapon === 1 ? 4 : 5 + currentSpread()*520;
   $('reticle').style.opacity = (P.alive && P.weapon === 2 && P.switchT <= 0) ? clamp((P.ads - 0.45)*2.6, 0, 1) : 0;
-  const xh = $('xhair'); xh.style.opacity = (P.alive && P.ads < 0.6 && !P.sprint && !P.heli && !P.boat) ? 1 : 0;
+  const xh = $('xhair'); xh.style.opacity = (P.alive && P.ads < 0.6 && !P.sprint && !P.heli && !P.boat && !P.jet) ? 1 : 0;
   xh.children[0].style.top = (-gap-9)+'px'; xh.children[1].style.top = gap+'px';
   xh.children[2].style.left = (-gap-9)+'px'; xh.children[3].style.left = gap+'px';
   hitT = Math.max(0, hitT - dt); $('hitm').style.opacity = hitT > 0 ? 1 : 0;
@@ -2189,6 +2205,7 @@ function backToMenu(){
   leaveMatch(false);
   if(P.boat) exitBoat(true);
   if(P.heli) exitHeli(true);
+  if(P.jet) exitJet(true);
   deployed = false; P.alive = false; setBots(false);
   $('hud').hidden = true; $('board').hidden = true;
   try{ if(document.pointerLockElement) document.exitPointerLock(); }catch(e){}
@@ -2268,8 +2285,8 @@ window.addEventListener('keydown', e => {
   if(e.code === 'Escape' && lockFailed){ pause(); return; }
   keys[e.code] = true;
   if(e.repeat) return;
-  if(e.code === 'KeyR' && !(P.boat || P.heli)){ if(P.weapon === 3) sniperReload(); else startReload(); }
-  if((e.code === 'KeyV' || e.code === 'KeyF') && !(P.boat || P.heli)) startMelee(now());
+  if(e.code === 'KeyR' && !(P.boat || P.heli || P.jet)){ if(P.weapon === 3) sniperReload(); else startReload(); }
+  if((e.code === 'KeyV' || e.code === 'KeyF') && !(P.boat || P.heli || P.jet)) startMelee(now());
   if(e.code === 'Digit1' || e.code === 'Numpad1') switchWeapon(1);
   if(e.code === 'Digit2' || e.code === 'Numpad2') switchWeapon(2);
   if(e.code === 'Digit3' || e.code === 'Numpad3') switchWeapon(3);
@@ -2277,9 +2294,9 @@ window.addEventListener('keydown', e => {
   if(e.code === 'Digit5' || e.code === 'Numpad5') switchWeapon(5);
   if(e.code === 'KeyQ') cycleWeapon(1);
   if(e.code === 'KeyT' && ARMS && P.alive && P.weapon === 2 && P.switchT <= 0 && P.reload <= 0 && !firing && P.ads < 0.1 && !ARMS.cur) armsPlay('INSPEC', 0.2);
-  if(e.code === 'KeyE'){ if(!tryBuy() && !toggleHeli()) toggleBoat(); return; }
-  if(e.code === 'Space' && P.grounded && P.alive && !(P.boat || P.heli)){ P.vel.y = P.crouch ? 4.5 : 6.2; footstep(0.35); }
-  if(e.code === 'KeyC' && !(P.boat || P.heli)) P.crouchToggle = !P.crouchToggle;
+  if(e.code === 'KeyE'){ if(!tryBuy() && !toggleHeli() && !toggleJet()) toggleBoat(); return; }
+  if(e.code === 'Space' && P.grounded && P.alive && !(P.boat || P.heli || P.jet)){ P.vel.y = P.crouch ? 4.5 : 6.2; footstep(0.35); }
+  if(e.code === 'KeyC' && !(P.boat || P.heli || P.jet)) P.crouchToggle = !P.crouchToggle;
 });
 window.addEventListener('keyup', e => {
   if(e.code === 'Tab'){ $('board').hidden = true; return; }
@@ -2319,6 +2336,7 @@ function setAvatarWeapon(av, wp){
 function loadModels(){
   if(!THREE.GLTFLoader) return;
   const loader = new THREE.GLTFLoader();
+  loader.load('models/jetski/jetski.glb', g => { setupJetski(g); loader.load('models/jetski/rider_arms.glb', a => setupRiderArms(a), undefined, () => {}); }, undefined, () => {});
   loader.load('models/heli.glb', g => setupHeli(g), undefined, () => {});
   loader.load('models/bim/market.glb', g => setupBimMarket(g), undefined, () => {});
   loader.load('models/bim/slipper.glb', g => setupSlipper(g), undefined, () => {});
@@ -2377,7 +2395,7 @@ function loadModels(){
 }
 
 /* ---------------- Paddling the boat ---------------- */
-P.boat = false; P.heli = false;
+P.boat = false; P.heli = false; P.jet = false;
 let boatAudio = null, boatPromptOn = false;
 const boatPrompt = $('boatPrompt');
 function boatSound(on){
@@ -2432,7 +2450,7 @@ function toggleBoat(){
   if(!P.alive || paused) return;
   if(P.boat){ exitBoat(false); return; }
   if(BOAT.driver && BOAT.driver !== myId){ banner('Boat taken', 'Someone else is paddling it'); return; }
-  if(boatDistTo(P.pos) < 3.4 && P.pos.y < 1.5) enterBoat();
+  if(boatDistTo(P.pos) < 3.4 && P.pos.y < 1.5 && !P.jet) enterBoat();
 }
 // Paddling: thrust comes in strokes. W alternates sides; A strokes on the right (turns left), D on the left.
 function driveBoat(dt){
@@ -2539,7 +2557,7 @@ function seaTick(dt){
     paddlePose(dt, moving, PADDLE.side, false);
   }
   boatEffects(dt);
-  const near = deployed && P.alive && !P.boat && !paused && boatDistTo(P.pos) < 3.4 && !(BOAT.driver && BOAT.driver !== myId);
+  const near = deployed && P.alive && !P.boat && !P.jet && !P.heli && !paused && boatDistTo(P.pos) < 3.4 && boatDistTo(P.pos) < jetDist(P.pos) && !(BOAT.driver && BOAT.driver !== myId);
   if(near !== boatPromptOn){ boatPromptOn = near; boatPrompt.hidden = !near; }
   updateDrops(dt);
 }
@@ -2702,7 +2720,7 @@ const THROW = {g:new THREE.Group(), egg:new THREE.Group(), slipper:new THREE.Gro
   const halo = makeGlowSprite(0.35, 0.35); THROW.slipper.add(halo);
 }
 function poseThrowable(dt, drop, bx, by, sk){
-  const show = (P.weapon === 4 || P.weapon === 5) && P.alive && !(P.boat || P.heli);
+  const show = (P.weapon === 4 || P.weapon === 5) && P.alive && !(P.boat || P.heli || P.jet);
   THROW.g.visible = show; if(!show) return;
   THROW.egg.visible = P.weapon === 4 && P.eggs > 0; THROW.slipper.visible = P.weapon === 5 && P.slippers > 0;
   P.throwT = Math.max(0, P.throwT - dt);
@@ -2916,7 +2934,7 @@ let shopFocus = null;
 const shopPrompt = $('shopPrompt');
 function shopTick(){
   let f = null;
-  if(deployed && P.alive && !(P.boat || P.heli) && !paused){
+  if(deployed && P.alive && !(P.boat || P.heli || P.jet) && !paused){
     // the item you're closest to and looking at
     let bs = Infinity; const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw);
     for(const it of BIM.items){
@@ -3306,6 +3324,338 @@ function toggleHeli(){
   enterHeli(); return true;
 }
 
+/* ---------------- Jet ski (models/jetski/jetski.glb), moored on the other side of the jetty ----------------
+   E to climb on. W throttle, S brake/reverse, A/D steer. Your arms (models/jetski/rider_arms.glb)
+   hold the handlebars and follow the steering; the dash screen is live. */
+const JET_S = 0.146;                                   // model units -> metres
+const JET = {g:new THREE.Group(), x:66.2, z:-5.9, h:-Math.PI/2, v:0, y:WATER_Y, pitch:0, roll:0, vy:0, steer:0, thr:0,
+  driver:null, stamp:0, tx:0, tz:0, th:0, hasT:false, speed:0, px:66.2, pz:-5.9, bar:null, gripR:null, gripL:null, arms:null, audio:null, screen:null};
+JET.g.position.set(JET.x, WATER_Y, JET.z); scene.add(JET.g);
+// spots in the jet ski's frame (nose -Z, origin at the waterline under the seat front)
+const JET_EYE = new V3(0, 1.5, 0.3), JET_FEET = new V3(0, 0.62, 0.3), JET_HALF = 1.6;
+// model (x forward, y up, z right) -> jet ski frame
+const jetM = (mx, my, mz) => new V3(mz*JET_S, (my - 0.15)*JET_S, -mx*JET_S);
+function setupJetski(g){
+  const m = g.scene;
+  m.traverse(o => { if(o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+  const inner = new THREE.Group(); inner.add(m); inner.scale.setScalar(JET_S); inner.rotation.y = Math.PI/2; inner.position.y = -0.15*JET_S;
+  JET.g.add(inner); inner.updateMatrixWorld(true);
+  // cut the handlebars out so they can turn with the steering
+  let mesh = null; m.traverse(o => { if(o.isMesh && !mesh) mesh = o; });
+  const isBar = v => v.y > 5.25 && v.x > 1.7 && v.x < 4.45 && !(Math.abs(v.z) < 0.98 && v.y > 5.88);
+  const pivotM = new V3(2.9, 5.5, 0);
+  const bar = new THREE.Group(); bar.position.copy(pivotM); inner.add(bar);
+  const geo = mesh.geometry, pa = geo.attributes.position, arr = pa.array, isz = pa.itemSize;
+  const norm = !pa.normalized ? 1 : arr instanceof Int16Array ? 1/32767 : arr instanceof Uint16Array ? 1/65535 : arr instanceof Int8Array ? 1/127 : arr instanceof Uint8Array ? 1/255 : 1;
+  const tag = new Uint8Array(pa.count), v = new V3();
+  // vertex positions relative to the model root (the mesh may sit under its own nodes)
+  const toRoot = new THREE.Matrix4().copy(m.matrixWorld).invert().multiply(mesh.matrixWorld);
+  for(let i=0;i<pa.count;i++){ v.set(arr[i*isz]*norm, arr[i*isz+1]*norm, arr[i*isz+2]*norm).applyMatrix4(toRoot); tag[i] = isBar(v) ? 1 : 0; }
+  if(geo.index){
+    const idx = geo.index.array, keep = [], cut = [];
+    for(let t=0;t<idx.length;t+=3){ const a = idx[t], b = idx[t+1], c = idx[t+2]; (tag[a] && tag[b] && tag[c] ? cut : keep).push(a, b, c); }
+    const IA = pa.count > 65535 ? Uint32Array : Uint16Array;
+    geo.setIndex(new THREE.BufferAttribute(new IA(keep), 1));
+    const g2 = new THREE.BufferGeometry(); for(const k in geo.attributes) g2.setAttribute(k, geo.attributes[k]); g2.setIndex(new THREE.BufferAttribute(new IA(cut), 1));
+    const bm = new THREE.Mesh(g2, mesh.material); bm.castShadow = true; bm.matrixAutoUpdate = false;
+    bm.matrix.copy(toRoot).premultiply(new THREE.Matrix4().makeTranslation(-pivotM.x, -pivotM.y, -pivotM.z));
+    bar.add(bm);
+  }
+  // the steering column leans back toward the rider
+  bar.userData.axis = new V3(-0.45, 0.89, 0).normalize();
+  JET.bar = bar;
+  JET.gripR = new THREE.Object3D(); JET.gripR.position.set(2.55 - pivotM.x, 5.55 - pivotM.y, 2.55); bar.add(JET.gripR);
+  JET.gripL = new THREE.Object3D(); JET.gripL.position.set(2.55 - pivotM.x, 5.55 - pivotM.y, -2.55); bar.add(JET.gripL);
+  // live dash screen sitting on the cowl in front of the bars
+  const sc = document.createElement('canvas'); sc.width = 512; sc.height = 256;
+  const tex = new THREE.CanvasTexture(sc); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.75), new THREE.MeshBasicMaterial({map:tex, toneMapped:false}));
+  const n = new V3(-0.515, 0.857, 0);
+  scr.position.set(2.8, 6.2, 0).addScaledVector(n, 0.07); scr.lookAt(scr.position.clone().add(n)); inner.add(scr);
+  JET.screen = {cv:sc, g:sc.getContext('2d'), tex, acc:1, t:0};
+  drawJetScreen();
+  JET.g.updateMatrixWorld(true);
+}
+function setupRiderArms(g){
+  const m = g.scene;
+  m.traverse(o => { if(o.isMesh){ o.frustumCulled = false; o.castShadow = false; } });
+  const rig = new THREE.Group(); rig.add(m); rig.scale.setScalar(0.0145); rig.rotation.y = Math.PI;
+  JET.g.add(rig); rig.visible = false;
+  const B = n => m.getObjectByName(n);
+  const side = s => ({arm:B(s+'_arm_' + (s === 'L' ? '01' : '023')), elbow:B(s+'_elbow_' + (s === 'L' ? '02' : '024')), wrist:B(s+'_wrist_' + (s === 'L' ? '03' : '025')),
+    fingers:['thumb','point','middle','ring','pink'].map(f => [1,2,3].map(k => findBone(m, s + '_' + f + k + '_')))});
+  JET.arms = {rig, model:m, L:side('L'), R:side('R')};
+  // put the shoulders just under the eye, a little forward, then fit
+  rig.updateMatrixWorld(true);
+  const sl = JET.arms.L.arm.getWorldPosition(new V3()), sr = JET.arms.R.arm.getWorldPosition(new V3());
+  const mid = sl.add(sr).multiplyScalar(0.5); JET.g.worldToLocal(mid);
+  rig.position.add(new V3(0, 1.17, 0.28).sub(mid));
+  // remember the rest pose so each frame starts clean
+  JET.arms.rest = [];
+  m.traverse(o => { if(o.isBone) JET.arms.rest.push([o, o.quaternion.clone()]); });
+}
+function findBone(root, prefix){ let f = null; root.traverse(o => { if(!f && o.isBone && o.name.startsWith(prefix)) f = o; }); return f; }
+// two-bone IK: aim the upper arm and forearm so the wrist lands on the target
+const _ik = {a:new V3(), b:new V3(), c:new V3(), t:new V3(), q:new THREE.Quaternion(), pq:new THREE.Quaternion(), wq:new THREE.Quaternion()};
+function aimBone(bone, from, to, want){
+  // rotate 'bone' (world) so the vector from->to turns into 'want'
+  const cur = to.clone().sub(from).normalize(), w = want.clone().normalize();
+  _ik.q.setFromUnitVectors(cur, w);
+  bone.getWorldQuaternion(_ik.wq);
+  bone.parent.getWorldQuaternion(_ik.pq);
+  bone.quaternion.copy(_ik.pq.invert().multiply(_ik.q.multiply(_ik.wq)));
+  bone.updateMatrixWorld(true);
+}
+function solveArm(S, target, pole){
+  const sh = S.arm.getWorldPosition(new V3()), el = S.elbow.getWorldPosition(new V3()), wr = S.wrist.getWorldPosition(new V3());
+  const l1 = sh.distanceTo(el), l2 = el.distanceTo(wr);
+  const toT = target.clone().sub(sh); const d = clamp(toT.length(), Math.abs(l1 - l2) + 1e-3, l1 + l2 - 1e-3);
+  const dir = toT.normalize();
+  const a = (l1*l1 - l2*l2 + d*d)/(2*d), h = Math.sqrt(Math.max(0, l1*l1 - a*a));
+  const pp = pole.clone().sub(dir.clone().multiplyScalar(pole.dot(dir))).normalize();
+  const elT = sh.clone().addScaledVector(dir, a).addScaledVector(pp, h);
+  aimBone(S.arm, sh, el, elT.clone().sub(sh));
+  const el2 = S.elbow.getWorldPosition(new V3()), wr2 = S.wrist.getWorldPosition(new V3());
+  const wT = sh.clone().addScaledVector(dir, d);
+  aimBone(S.elbow, el2, wr2, wT.clone().sub(el2));
+}
+function poseRiderArms(){
+  const A = JET.arms; if(!A || !JET.gripR) return;
+  for(const [b, q] of A.rest) b.quaternion.copy(q);
+  A.rig.updateMatrixWorld(true);
+  JET.g.updateMatrixWorld(true);
+  const fwd = new V3(0, 0, -1).transformDirection(JET.g.matrixWorld), up = new V3(0, 1, 0).transformDirection(JET.g.matrixWorld), right = new V3(1, 0, 0).transformDirection(JET.g.matrixWorld);
+  for(const [S, grip, sd] of [[A.R, JET.gripR, 1], [A.L, JET.gripL, -1]]){
+    const g = grip.getWorldPosition(new V3()).addScaledVector(up, 0.06).addScaledVector(fwd, 0.02).addScaledVector(right, -sd*0.03);
+    const handDir = fwd.clone().addScaledVector(right, sd*0.2).addScaledVector(up, -0.3).normalize();
+    const palmDown = up.clone().negate().addScaledVector(right, -sd*0.25).normalize();
+    // palm centre should sit just above the grip; iterate: solve, orient hand, measure palm offset, re-solve
+    let off = fwd.clone().multiplyScalar(0.07);
+    for(let it = 0; it < 3; it++){
+      for(const [bb, q] of A.rest) if(bb.parent && (bb === S.arm || bb === S.elbow || bb === S.wrist)) bb.quaternion.copy(q);
+      const wT = g.clone().sub(off).addScaledVector(palmDown, -0.035);
+      solveArm(S, wT, right.clone().multiplyScalar(sd*0.3).addScaledVector(up, -1).addScaledVector(fwd, -0.4));
+      orientHand(S, sd, handDir, palmDown);
+      const w0 = S.wrist.getWorldPosition(new V3()), pc = new V3(); let n = 0;
+      for(let fi = 1; fi < 5; fi++){ const fb = S.fingers[fi][0]; if(fb){ pc.add(fb.getWorldPosition(new V3())); n++; } }
+      if(!n) break;
+      pc.divideScalar(n).add(w0).multiplyScalar(0.5);
+      off = pc.sub(w0);
+    }
+    // curl every finger segment toward the palm side, in world space (independent of bone axes)
+    S.fingers.forEach((chain, fi) => chain.forEach((b, k) => {
+      if(!b) return;
+      const nx = chain[k + 1] || (b.children[0] && b.children[0].isBone ? b.children[0] : null); if(!nx) return;
+      const bp = b.getWorldPosition(new V3()), d = nx.getWorldPosition(new V3()).sub(bp).normalize();
+      const ax = d.clone().cross(palmDown); if(ax.lengthSq() < 1e-6) return; ax.normalize();
+      rotWorld(b, ax, fi === 0 ? 0.3 : (k === 0 ? 1.05 : 1.15));
+    }));
+  }
+}
+function rotWorld(bone, axis, ang){
+  _ik.q.setFromAxisAngle(axis, ang); bone.getWorldQuaternion(_ik.wq); bone.parent.getWorldQuaternion(_ik.pq);
+  bone.quaternion.copy(_ik.pq.invert().multiply(_ik.q.multiply(_ik.wq))); bone.updateMatrixWorld(true);
+}
+function orientHand(S, sd, handDir, palmDown){
+  const wr = S.wrist.getWorldPosition(new V3()), mid = S.fingers[2][0] ? S.fingers[2][0].getWorldPosition(new V3()) : null;
+  if(!mid) return;
+  aimBone(S.wrist, wr, mid, handDir);
+  const p1 = S.fingers[1][0], k1 = S.fingers[4][0]; if(!p1 || !k1) return;
+  const w0 = S.wrist.getWorldPosition(new V3()), a = p1.getWorldPosition(new V3()).sub(w0), b = k1.getWorldPosition(new V3()).sub(w0);
+  const nrm = a.clone().cross(b).normalize().multiplyScalar(JET_PALM_SIGN*sd), ax = handDir;
+  const n0 = nrm.sub(ax.clone().multiplyScalar(nrm.dot(ax))).normalize(), w1 = palmDown.clone().sub(ax.clone().multiplyScalar(palmDown.dot(ax))).normalize();
+  let ang = Math.acos(clamp(n0.dot(w1), -1, 1)); if(n0.clone().cross(w1).dot(ax) < 0) ang = -ang;
+  rotWorld(S.wrist, ax, ang);
+}
+let JET_CURL_AXIS = new V3(0, 0, 1), JET_CURL_SIGN = 1, JET_PALM_SIGN = 1;
+function drawJetScreen(){
+  const S = JET.screen; if(!S) return;
+  const g = S.g, W = 512, H = 256, on = !!JET.driver || P.jet;
+  g.fillStyle = '#04070a'; g.fillRect(0, 0, W, H);
+  if(!on){ g.strokeStyle = '#1a2a30'; g.lineWidth = 6; g.strokeRect(3, 3, W - 6, H - 6); S.tex.needsUpdate = true; return; }
+  const spd = Math.abs(JET.speed)*3.6, rpm = 1200 + Math.abs(JET.thr)*5200 + Math.min(1, JET.speed/18)*1200 + Math.sin(S.t*20)*40;
+  // rpm arc
+  const cx = 128, cy = 150, r = 100;
+  g.lineWidth = 16; g.strokeStyle = '#122a33'; g.beginPath(); g.arc(cx, cy, r, Math.PI*0.8, Math.PI*2.2); g.stroke();
+  const f = clamp(rpm/7500, 0, 1);
+  g.strokeStyle = f > 0.85 ? '#ff4a2e' : '#22e3c4'; g.beginPath(); g.arc(cx, cy, r, Math.PI*0.8, Math.PI*0.8 + f*Math.PI*1.4); g.stroke();
+  txt(g, String(Math.round(spd)), cx, cy - 10, 64, '#f2fbfb', 'center'); txt(g, 'km/h', cx, cy + 36, 18, '#22e3c4', 'center');
+  txt(g, 'RPM x1000  ' + (rpm/1000).toFixed(1), cx, cy + 74, 14, '#8fb4bd', 'center');
+  // right side: gear, fuel, heading, temp
+  const gear = JET.thr < -0.1 ? 'R' : JET.speed > 0.5 || JET.thr > 0 ? 'F' : 'N';
+  txt(g, gear, 300, 52, 52, gear === 'R' ? '#ffb020' : '#22e3c4', 'center');
+  const hd = ((180 - JET.h*180/Math.PI) % 360 + 360) % 360, dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  txt(g, dirs[Math.round(hd/45)%8] + ' ' + String(Math.round(hd)).padStart(3, '0') + '°', 420, 52, 26, '#f2fbfb', 'center');
+  g.fillStyle = '#122a33'; g.fillRect(270, 100, 220, 18); const fuel = 0.78 - (S.t*0.0008)%0.5;
+  g.fillStyle = fuel < 0.3 ? '#ffb020' : '#22e3c4'; g.fillRect(272, 102, 216*fuel, 14);
+  txt(g, 'FUEL', 270, 132, 14, '#8fb4bd'); txt(g, Math.round(fuel*100) + '%', 490, 132, 14, '#f2fbfb', 'right');
+  txt(g, 'ENG 78°C', 270, 170, 18, '#f2fbfb'); txt(g, 'BATT 13.4V', 490, 170, 18, '#f2fbfb', 'right');
+  txt(g, 'TRIP ' + (S.trip || 0).toFixed(2) + ' km', 270, 210, 18, '#22e3c4');
+  g.strokeStyle = '#22e3c4'; g.lineWidth = 3; g.strokeRect(2, 2, W - 4, H - 4);
+  S.tex.needsUpdate = true;
+}
+function jetHullOk(x, z, h){
+  const fx = -Math.sin(h), fz = -Math.cos(h);
+  for(const s of [-1, -0.5, 0, 0.5, 1]){
+    const px = x + fx*s*(JET_HALF - 0.1), pz = z + fz*s*(JET_HALF - 0.1);
+    if(groundAt(px, pz) > WATER_Y - 0.25) return false;
+    if(px > JETTY.x0 - 0.5 && px < JETTY.x1 + 0.5 && Math.abs(pz - JETTY.z) < JETTY.w/2 + 0.5) return false;
+    if(px > 300 || Math.abs(pz) > 230) return false;
+  }
+  // don't drive through the boat
+  const bfx = -Math.sin(BOAT.h), bfz = -Math.cos(BOAT.h);
+  const t = clamp((x - BOAT.x)*bfx + (z - BOAT.z)*bfz, -BOAT_HALF, BOAT_HALF);
+  if(Math.hypot(x - (BOAT.x + bfx*t), z - (BOAT.z + bfz*t)) < 1.3) return false;
+  return true;
+}
+function jetDist(p){
+  const fx = -Math.sin(JET.h), fz = -Math.cos(JET.h);
+  const t = clamp((p.x - JET.x)*fx + (p.z - JET.z)*fz, -JET_HALF, JET_HALF);
+  return Math.hypot(p.x - (JET.x + fx*t), p.z - (JET.z + fz*t));
+}
+function floatJet(dt){
+  const fx = -Math.sin(JET.h), fz = -Math.cos(JET.h), rx = Math.cos(JET.h), rz = -Math.sin(JET.h);
+  const hb = waveAt(JET.x + fx*1.3, JET.z + fz*1.3), hs = waveAt(JET.x - fx*1.3, JET.z - fz*1.3);
+  const hl = waveAt(JET.x - rx*0.5, JET.z - rz*0.5), hr = waveAt(JET.x + rx*0.5, JET.z + rz*0.5);
+  const sp = Math.min(Math.abs(JET.speed), 20);
+  const y = (hb + hs + hl + hr)/4 + sp*0.008;                         // rides up out of the water at speed
+  const k = 1 - Math.exp(-dt*7);
+  const py = JET.y; JET.y += (y - JET.y)*k; JET.vy = (JET.y - py)/Math.max(dt, 1e-4);
+  const tp = Math.atan2(hb - hs, 2.6) + sp*0.006 + JET.thr*0.03;      // nose lifts on the throttle
+  const tr = Math.atan2(hr - hl, 1.0)*0.5 - JET.steer*Math.min(sp, 16)*0.022;   // leans into the turn
+  JET.pitch += (tp - JET.pitch)*k; JET.roll += (tr - JET.roll)*k;
+  JET.g.position.set(JET.x, JET.y, JET.z);
+  JET.g.rotation.order = 'YXZ'; JET.g.rotation.set(JET.pitch, JET.h, JET.roll);
+  if(JET.bar){ JET.bar.quaternion.setFromAxisAngle(JET.bar.userData.axis, JET.steer*0.38); }
+  JET.g.updateMatrixWorld(true);
+}
+function enterJet(){
+  P.jet = true; P.vel.set(0,0,0); P.crouch = true; P.crouchToggle = false; P.h = 1.25; P.sprint = false;
+  JET.driver = myId; JET.v = 0; adsHeld = false;
+  P.yaw = JET.h; P.pitch = -0.42;
+  if(JET.arms) JET.arms.rig.visible = true;
+  thud(0.5, 80); jetSound(true);
+  banner('Jet ski', 'W throttle · S brake / reverse · A / D steer · E get off');
+  netDirty = true;
+}
+function exitJet(forced){
+  let land = null;
+  if(!forced){
+    const nearJetty = JET.x < JETTY.x1 + 4 && Math.abs(JET.z - JETTY.z) < 4;
+    if(nearJetty) land = new V3(JETTY.x1 - 0.6, 0.14, JETTY.z);
+    else if(JET.x < shoreX(JET.z) + 14 && Math.abs(JET.z) < 43.5){ const z = clamp(JET.z, -43.5, 43.5), x = shoreX(z) + 1.2; land = new V3(x, groundAt(x, z), z); }
+    else { const dx = JET.x - ISLE.x, dz = JET.z - ISLE.z, d = Math.hypot(dx, dz); if(d < ISLE.r + 13) land = new V3(ISLE.x + dx/d*(ISLE.r - 1), 0, ISLE.z + dz/d*(ISLE.r - 1)); }
+    if(!land){ banner('Too far from land', 'Ride to the beach, the jetty or the island'); return; }
+  }
+  P.jet = false; JET.driver = null; JET.v = 0; JET.thr = 0; JET.steer = 0; JET.stamp = Date.now();
+  P.crouch = false; P.h = 1.8; P.eye = 1.62;
+  if(land){ P.pos.copy(land); P.vel.set(0,0,0); }
+  if(JET.arms) JET.arms.rig.visible = false;
+  jetSound(false); netDirty = true;
+}
+function toggleJet(){
+  if(!P.alive || paused || P.boat || P.heli) return false;
+  if(P.jet){ exitJet(false); return true; }
+  const d = jetDist(P.pos);
+  if(d >= 3.4 || P.pos.y > 1.5 || d > boatDistTo(P.pos)) return false;          // the boat wins if it's closer
+  if(JET.driver && JET.driver !== myId){ banner('Jet ski taken', 'Someone else is riding it'); return true; }
+  enterJet(); return true;
+}
+function jetSound(on){
+  if(!AC) return;
+  if(on && !JET.audio){
+    const t = AC.currentTime;
+    const o1 = AC.createOscillator(); o1.type = 'sawtooth'; o1.frequency.value = 55;
+    const o2 = AC.createOscillator(); o2.type = 'square'; o2.frequency.value = 110.7;
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600; lp.Q.value = 0.7;
+    const eg = AC.createGain(); eg.gain.value = 0.0001; const o2g = AC.createGain(); o2g.gain.value = 0.25;
+    o1.connect(lp); o2.connect(o2g); o2g.connect(lp); lp.connect(eg); eg.connect(master);
+    const n = AC.createBufferSource(); n.buffer = noiseBuf; n.loop = true;
+    const nf = AC.createBiquadFilter(); nf.type = 'lowpass'; nf.frequency.value = 700;
+    const ng = AC.createGain(); ng.gain.value = 0.0001; n.connect(nf); nf.connect(ng); ng.connect(master);
+    o1.start(t); o2.start(t); n.start(t);
+    JET.audio = {o1, o2, lp, eg, n, nf, ng};
+  } else if(!on && JET.audio){
+    const a = JET.audio; JET.audio = null; const t = AC.currentTime;
+    a.eg.gain.setTargetAtTime(0.0001, t, 0.2); a.ng.gain.setTargetAtTime(0.0001, t, 0.2);
+    setTimeout(() => { try{ a.o1.stop(); a.o2.stop(); a.n.stop(); }catch(e){} }, 1200);
+  }
+}
+function driveJet(dt){
+  const thr = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), st = (keys.KeyA ? 1 : 0) - (keys.KeyD ? 1 : 0);
+  JET.thr += (thr - JET.thr)*Math.min(1, dt*6);
+  JET.steer += (st - JET.steer)*Math.min(1, dt*7);
+  const VMAX = 19, VREV = -3.5;
+  if(thr > 0) JET.v += 9*(1 - JET.v/VMAX)*dt;
+  else if(thr < 0) JET.v += (JET.v > 0 ? -12 : -4)*dt;
+  JET.v -= JET.v*(thr === 0 ? 0.45 : 0.08)*dt;
+  JET.v = clamp(JET.v, VREV, VMAX);
+  // a jet ski steers with its thrust: tight at speed, lazy when idling
+  const dh = JET.steer*(0.5 + Math.min(Math.abs(JET.v), 12)*0.11)*(JET.v < -0.2 ? -1 : 1)*dt;
+  const nh = JET.h + dh;
+  const nx = JET.x - Math.sin(nh)*JET.v*dt, nz = JET.z - Math.cos(nh)*JET.v*dt;
+  if(jetHullOk(nx, nz, nh)){ JET.x = nx; JET.z = nz; JET.h = nh; P.yaw += dh; }
+  else if(jetHullOk(JET.x, JET.z, nh)){ JET.h = nh; P.yaw += dh; if(Math.abs(JET.v) > 2) thud(0.4, 60); JET.v *= -0.2; }
+  else { if(Math.abs(JET.v) > 2) thud(0.4, 60); JET.v *= -0.2; }
+  if(JET.screen) JET.screen.trip = (JET.screen.trip || 0) + Math.abs(JET.v)*dt/1000;
+  if(JET.audio){
+    const t = AC.currentTime, s = Math.abs(JET.v)/VMAX, load = Math.max(0, JET.thr);
+    const f = 48 + load*55 + s*45;
+    JET.audio.o1.frequency.setTargetAtTime(f, t, 0.08); JET.audio.o2.frequency.setTargetAtTime(f*2.013, t, 0.08);
+    JET.audio.lp.frequency.setTargetAtTime(380 + load*900, t, 0.1);
+    JET.audio.eg.gain.setTargetAtTime(0.05 + load*0.11 + s*0.04, t, 0.08);
+    JET.audio.ng.gain.setTargetAtTime(0.02 + s*0.22, t, 0.12); JET.audio.nf.frequency.setTargetAtTime(500 + s*1200, t, 0.12);
+  }
+}
+function seatJet(){ JET.g.localToWorld(P.pos.copy(JET_FEET)); P.vel.set(0,0,0); P.grounded = false; }
+function jetCamera(t){
+  const eye = JET.g.localToWorld(_jv.copy(JET_EYE));
+  camera.position.copy(eye);
+  if(P.pitch < -0.62) P.pitch = -0.62;   // don't look down into your own sleeves
+  const buzz = Math.min(1, Math.abs(JET.v)/10)*0.0025;
+  camera.rotation.set(P.pitch + JET.pitch*0.7 + Math.sin(t*33)*buzz, P.yaw + Math.sin(t*29)*buzz, JET.roll*0.75);
+}
+const _jv = new V3();
+// spray: rooster tail out the back on the throttle, bow spray and wake at speed
+let jetWakeAcc = 0, jetSprayAcc = 0;
+function jetEffects(dt){
+  const sp = Math.hypot(JET.x - JET.px, JET.z - JET.pz)/Math.max(dt, 1e-4); JET.px = JET.x; JET.pz = JET.z;
+  JET.speed += (Math.min(sp, 25)*(JET.v < -0.2 ? -1 : 1) - JET.speed)*Math.min(1, dt*6);
+  const v = Math.abs(JET.speed), fx = -Math.sin(JET.h), fz = -Math.cos(JET.h), rx = Math.cos(JET.h), rz = -Math.sin(JET.h);
+  if(v > 1){
+    jetWakeAcc += dt*(1.5 + v*0.8);
+    while(jetWakeAcc > 1){ jetWakeAcc--; for(const sd of [-1, 1]) emitWake(JET.x + fx*1.1 + rx*sd*0.35, JET.z + fz*1.1 + rz*sd*0.35, rx*sd*v*0.3, rz*sd*v*0.3, 0.4, 1.3 + v*0.25, 1.8 + v*0.08, JET.h + sd*0.5); if(Math.random() < 0.6) emitWake(JET.x - fx*1.7, JET.z - fz*1.7, 0, 0, 0.5, 1.1 + v*0.2, 2, JET.h); }
+  }
+  const tail = (P.jet || (JET.driver && JET.driver !== myId)) ? Math.max(0, JET.thr)*2 + v*0.5 : 0;
+  jetSprayAcc += dt*tail*10;
+  while(jetSprayAcc > 1){
+    jetSprayAcc--;
+    const ex = JET.x - fx*1.7, ez = JET.z - fz*1.7, ey = waveAt(ex, ez) + 0.15;
+    emitSpray(ex + rand(-0.15, 0.15), ey, ez + rand(-0.15, 0.15), -fx*rand(2, 5) + rand(-0.6, 0.6), rand(2.5, 5.5)*Math.min(1, 0.4 + JET.thr), -fz*rand(2, 5) + rand(-0.6, 0.6));
+    if(v > 4 && Math.random() < 0.5){ const sd = Math.random() < 0.5 ? -1 : 1; const bx = JET.x + fx*0.9 + rx*sd*0.45, bz = JET.z + fz*0.9 + rz*sd*0.45; emitSpray(bx, waveAt(bx, bz) + 0.1, bz, rx*sd*v*0.25 + fx*v*0.3, rand(0.8, 2)*Math.min(v, 12)*0.18, rz*sd*v*0.25 + fz*v*0.3); }
+  }
+}
+let jetPromptOn = false;
+const jetPrompt = $('jetPrompt');
+function jetTick(dt, t){
+  if(!P.jet){
+    if(JET.hasT){ const k = Math.min(1, dt*10); JET.x += (JET.tx - JET.x)*k; JET.z += (JET.tz - JET.z)*k; JET.h += wrapA(JET.th - JET.h)*k; JET.thr = Math.min(1, JET.speed/8); }
+    else { JET.thr *= Math.exp(-dt*4); JET.steer *= Math.exp(-dt*4); }
+    floatJet(dt);
+  }
+  jetEffects(dt);
+  if(P.jet) poseRiderArms();
+  if(JET.screen){ JET.screen.t += dt; JET.screen.acc += dt; const near = P.jet || camera.position.distanceTo(JET.g.position) < 12; if(near && JET.screen.acc > 0.1){ JET.screen.acc = 0; drawJetScreen(); } }
+  if(!P.jet && JET.hasT && JET.audio === null){ /* remote rider: engine heard by distance below */ }
+  if(!P.jet){
+    const d = camera.position.distanceTo(JET.g.position), riding = JET.hasT && JET.driver;
+    if(riding && d < 90){ jetSound(true); if(JET.audio){ const at = AC.currentTime, k = Math.min(1, 14/(d + 5)), s = Math.abs(JET.speed)/19; JET.audio.eg.gain.setTargetAtTime((0.04 + s*0.12)*k, at, 0.1); JET.audio.o1.frequency.setTargetAtTime(50 + s*90, at, 0.1); JET.audio.o2.frequency.setTargetAtTime((50 + s*90)*2.013, at, 0.1); JET.audio.ng.gain.setTargetAtTime(s*0.15*k, at, 0.1); } }
+    else jetSound(false);
+  }
+  const near = deployed && P.alive && !P.jet && !P.boat && !P.heli && !paused && jetDist(P.pos) < 3.4 && P.pos.y < 1.5 && jetDist(P.pos) <= boatDistTo(P.pos) && !(JET.driver && JET.driver !== myId);
+  if(near !== jetPromptOn){ jetPromptOn = near; jetPrompt.hidden = !near; }
+}
+
 /* ---------------- Main loop ---------------- */
 let last = now(), presenceTick = 0;
 function update(dt, t){
@@ -3323,6 +3673,8 @@ function update(dt, t){
   // Move
   if(P.heli && P.alive){
     flyHeli(dt); placeHeli(); seatHeli(); P.sprint = false;
+  } else if(P.jet && P.alive){
+    driveJet(dt); floatJet(dt); seatJet(); P.sprint = false;
   } else if(P.boat && P.alive){
     driveBoat(dt); floatBoat(dt); seatPlayer(); P.sprint = false;
   } else if(P.alive){
@@ -3347,14 +3699,14 @@ function update(dt, t){
     P.vel.x *= 0.9; P.vel.z *= 0.9; P.sprint = false;
     if(t > P.respawnAt) respawn();
   }
-  if(!P.boat && !P.heli){
+  if(!P.boat && !P.heli && !P.jet){
     P.vel.y -= 18*dt;
     moveBody(P, dt);
     P.eye += ((P.alive ? (P.crouch ? 1.05 : 1.62) : 0.35) - P.eye)*Math.min(1, dt*(P.alive?12:4));
   }
 
   // ADS, recoil recovery
-  const wantAds = adsHeld && P.alive && P.reload <= 0 && !P.sprint && !(P.boat || P.heli) && P.switchT <= 0 && (P.weapon === 2 || (P.weapon === 3 && SN.busy <= 0));
+  const wantAds = adsHeld && P.alive && P.reload <= 0 && !P.sprint && !(P.boat || P.heli || P.jet) && P.switchT <= 0 && (P.weapon === 2 || (P.weapon === 3 && SN.busy <= 0));
   P.ads += ((wantAds?1:0) - P.ads)*Math.min(1, dt*12);
   P.punch *= Math.exp(-dt*9); P.punchYaw *= Math.exp(-dt*9);
   P.bloom = Math.max(0, P.bloom - dt*(firing?0.02:0.12));
@@ -3364,6 +3716,7 @@ function update(dt, t){
   // Camera
   if(P.boat) boatCamera(t);
   else if(P.heli) heliCamera(t);
+  else if(P.jet) jetCamera(t);
   else {
     camera.position.set(P.pos.x, P.pos.y + P.eye, P.pos.z);
     // a little breathing sway through the scope (less when crouched)
@@ -3381,10 +3734,10 @@ function update(dt, t){
     if(!P.meleeHitDone && MELEE_TIME - P.melee >= 0.11 && P.alive) meleeHit(t);
     if(P.melee <= 0) P.melee = 0;
   }
-  if(P.boat || P.heli){ /* hands busy */ }
+  if(P.boat || P.heli || P.jet){ /* hands busy */ }
   else if(P.weapon === 1){ if(firing && P.alive && P.melee <= 0 && P.switchT <= 0 && t >= P.meleeCd && !paused) startMelee(t); }
   else if(P.weapon === 3){ /* bolt action: see sniperTick */ }
-  else if(P.weapon >= 4){ if(firing && P.alive && P.switchT <= 0 && !paused && !(P.boat || P.heli) && t >= P.nextShot){ firing = false; throwItem(t); } }
+  else if(P.weapon >= 4){ if(firing && P.alive && P.switchT <= 0 && !paused && !(P.boat || P.heli || P.jet) && t >= P.nextShot){ firing = false; throwItem(t); } }
   else if(firing && P.alive && P.reload <= 0 && P.melee <= 0 && P.switchT <= 0 && !paused){
     if(P.sprint) P.sprint = false;
     let n = 0;
@@ -3450,7 +3803,7 @@ function update(dt, t){
     knife.rotation.set(kp.r[0] - drop*0.7 - sk*0.25, kp.r[1] + sk*0.3, kp.r[2]);
   } else knife.visible = false;
   if(KARMS){
-    const showK = knife.visible && P.alive && !(P.boat || P.heli);
+    const showK = knife.visible && P.alive && !(P.boat || P.heli || P.jet);
     knife.visible = false;               // the old code-built knife hand is replaced
     KARMS.vm.visible = showK;
     if(showK){
@@ -3474,7 +3827,7 @@ function update(dt, t){
   gunRoot.rotation.set(rx, ry, rz);
   if(ARMS){
     gunRoot.visible = false;
-    const show = !knifeOut && P.alive && !(P.boat || P.heli) && P.weapon !== 3 && P.weapon < 4;
+    const show = !knifeOut && P.alive && !(P.boat || P.heli || P.jet) && P.weapon !== 3 && P.weapon < 4;
     ARMS.vm.visible = show;
     if(ARMS.cur && ARMS.cur.getClip().name === 'INSPEC' && (adsHeld || firing)) armsToIdle(0.15);
     ARMS.mixer.update(dt);
@@ -3520,6 +3873,7 @@ function frame(){
   seaTick(dt);
   bimTick(dt, t);
   heliTick(dt, t);
+  jetTick(dt, t);
   if(deployed) update(dt, t);
   else {
     // Idle flyover behind the menu

@@ -24,3 +24,5 @@ W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam 
 - Egg box: "Egg box" by Antoine Dresen (https://sketchfab.com/adresen), CC BY 4.0. Simplified for the web.
 - BIM name and logo belong to BİM Birleşik Mağazalar A.Ş.; used here in a private fan game among friends.
 - Helicopter: "EC 135" by GRIP420 (https://sketchfab.com/GRIP420), CC BY 4.0. Textures recompressed and mesh simplified for the web.
+- Jet ski: "Jetski" by cm21 (Sketchfab), CC BY 4.0. Textures recompressed and mesh simplified for the web.
+- Jet ski rider arms: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), CC BY 4.0. Posed to hold the handlebars.
