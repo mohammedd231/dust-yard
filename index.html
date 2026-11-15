@@ -2073,7 +2073,7 @@ function updateHUD(dt, t){
   $('scope').style.opacity = scoped ? 1 : 0;
   const gap = P.weapon === 1 ? 4 : 5 + currentSpread()*520;
   $('reticle').style.opacity = (P.alive && P.weapon === 2 && P.switchT <= 0) ? clamp((P.ads - 0.45)*2.6, 0, 1) : 0;
-  const xh = $('xhair'); xh.style.opacity = (P.alive && P.ads < 0.6 && !P.sprint) ? 1 : 0;
+  const xh = $('xhair'); xh.style.opacity = (P.alive && P.ads < 0.6 && !P.sprint && !P.heli && !P.boat) ? 1 : 0;
   xh.children[0].style.top = (-gap-9)+'px'; xh.children[1].style.top = gap+'px';
   xh.children[2].style.left = (-gap-9)+'px'; xh.children[3].style.left = gap+'px';
   hitT = Math.max(0, hitT - dt); $('hitm').style.opacity = hitT > 0 ? 1 : 0;
@@ -2202,8 +2202,9 @@ function onLockError(){
 function requestLock(){
   if(lockFailed) return;
   try{
-    const r = canvas.requestPointerLock && canvas.requestPointerLock();
-    if(r && r.catch) r.catch(onLockError);
+    // raw mouse input where the browser supports it: no OS acceleration, none of the jumps it causes
+    const r = canvas.requestPointerLock && canvas.requestPointerLock({unadjustedMovement:true});
+    if(r && r.catch) r.catch(() => { try{ const r2 = canvas.requestPointerLock(); if(r2 && r2.catch) r2.catch(onLockError); }catch(e){ onLockError(); } });
   }catch(e){ onLockError(); }
 }
 function resume(){ paused = false; $('menu').hidden = true; $('hud').hidden = false; }
@@ -2249,8 +2250,17 @@ window.addEventListener('wheel', e => {
 }, {passive:true});
 window.addEventListener('mousemove', e => {
   if(!deployed || paused || !(locked || lockFailed)) return;
-  mouseDX += e.movementX || 0; mouseDY += e.movementY || 0;
+  // Some browsers (Chrome on Windows especially) now and then report one huge bogus jump while the
+  // mouse is moving fast. Drop any single event far bigger than the movement just before it.
+  const dx = e.movementX || 0, dy = e.movementY || 0, m = Math.max(Math.abs(dx), Math.abs(dy));
+  const tNow = performance.now();
+  if(tNow - lastMoveT > 120) lastMoveMag = 0;
+  lastMoveT = tNow;
+  if(m > 180 && m > lastMoveMag*4 + 60){ lastMoveMag = Math.min(lastMoveMag*1.5 + 20, 400); return; }
+  lastMoveMag = m;
+  mouseDX += dx; mouseDY += dy;
 });
+let lastMoveMag = 0, lastMoveT = 0;
 window.addEventListener('keydown', e => {
   if(e.code === 'Tab' && deployed && !paused){ e.preventDefault(); $('board').hidden = false; hudTimer = 0; return; }
   if(!deployed || paused) return;
@@ -2971,7 +2981,7 @@ const HELI_S = 0.17;                                     // model units -> metre
 const HELI = {g:new THREE.Group(), x:51.8, y:0, z:-33, h:Math.PI, vx:0, vy:0, vz:0, yawRate:0, pitch:0, roll:0, rotor:0,
   driver:null, stamp:0, mixer:null, act:null, disc:null, tx:0, ty:0, tz:0, th:0, hasT:false, landed:true, audio:null};
 // cockpit spots in the helicopter's own frame (origin under the main rotor, at the skids)
-const HELI_EYE = new V3(0, 2.02, -0.86), HELI_FEET = new V3(0, 0.95, -0.9);
+const HELI_EYE = new V3(0, 1.98, -1.32), HELI_FEET = new V3(0, 0.95, -1.2);
 const HELI_SPHERES = [[0, 1.3, -2.3, 1.2], [0, 1.4, -0.3, 1.5], [0, 1.9, 3.2, 0.8], [0, 2.1, 5.6, 0.7]];
 HELI.g.position.set(HELI.x, 0, HELI.z); scene.add(HELI.g);
 {
@@ -2986,7 +2996,16 @@ HELI.g.position.set(HELI.x, 0, HELI.z); scene.add(HELI.g);
 }
 function setupHeli(g){
   const m = g.scene;
-  m.traverse(o => { if(o.isMesh){ o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; if(/Glass/.test(o.material.name)){ o.material.transparent = true; o.material.opacity = Math.min(o.material.opacity, 0.35); o.material.depthWrite = false; } } });
+  const drop = [];
+  m.traverse(o => {
+    if(!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+    const mn = o.material.name || '';
+    if(/Body6|Shoes6|ResucePilot/.test(mn)){ drop.push(o); return; }          // the two crew figures
+    if(/Glass/.test(mn)){ o.material.transparent = true; o.material.opacity = Math.min(o.material.opacity, 0.35); o.material.depthWrite = false; }
+    if(mn === 'EC135_CockpitButtons_Mat' && !MFD.g) setupCockpitDisplays(o.material);
+  });
+  drop.forEach(o => o.visible = false);
   const inner = new THREE.Group(); inner.add(m);
   inner.scale.setScalar(HELI_S); inner.position.set(0, 830.2*HELI_S, 5.29*HELI_S);
   HELI.g.add(inner);
@@ -2995,6 +3014,138 @@ function setupHeli(g){
   const disc = new THREE.Mesh(new THREE.CircleGeometry(5.1, 48), new THREE.MeshBasicMaterial({color:0x222222, transparent:true, opacity:0, depthWrite:false, side:THREE.DoubleSide}));
   disc.rotation.x = -Math.PI/2; disc.position.set(0, (830.2 - 810.4)*HELI_S + 0.05, 0); HELI.g.add(disc); HELI.disc = disc;
   HELI.g.updateMatrixWorld(true);
+}
+/* Live cockpit displays: the instrument panel texture is redrawn with flight data on its screens.
+   Rectangles are screen areas in the panel's 1024x1024 texture atlas. */
+const MFD = {base:null, cv:null, g:null, tex:null, ecv:null, eg:null, etex:null, t:0,
+  screens:{pfd:[344,44,212,146], pfd2:[52,420,208,144], nav:[404,286,210,146], eng:[404,526,210,144], com:[38,52,178,116], wrn:[38,203,178,115], gps:[330,764,188,130], clk:[50,694,140,106]},
+  dials:[[782,240,40,'rpm'],[943,282,40,'alt'],[786,403,38,'vsi'],[648,893,40,'spd'],[808,893,40,'trq']]};
+function setupCockpitDisplays(mat){
+  const img = mat.map && mat.map.image; if(!img) return;
+  const S = 1024;
+  MFD.base = img;
+  MFD.cv = document.createElement('canvas'); MFD.cv.width = MFD.cv.height = S; MFD.g = MFD.cv.getContext('2d');
+  MFD.ecv = document.createElement('canvas'); MFD.ecv.width = MFD.ecv.height = S; MFD.eg = MFD.ecv.getContext('2d');
+  MFD.tex = new THREE.CanvasTexture(MFD.cv); MFD.tex.flipY = mat.map.flipY; MFD.tex.encoding = THREE.sRGBEncoding; MFD.tex.anisotropy = 4;
+  MFD.etex = new THREE.CanvasTexture(MFD.ecv); MFD.etex.flipY = mat.map.flipY; MFD.etex.encoding = THREE.sRGBEncoding;
+  mat.map = MFD.tex; mat.emissiveMap = MFD.etex; mat.emissive = new THREE.Color(0xffffff); mat.emissiveIntensity = 0.85; mat.needsUpdate = true;
+  drawCockpit();
+}
+function hdgDeg(){ return ((180 - HELI.h*180/Math.PI) % 360 + 360) % 360; }
+function drawCockpit(){
+  const g = MFD.g, e = MFD.eg; if(!g) return;
+  g.drawImage(MFD.base, 0, 0, 1024, 1024);
+  e.fillStyle = '#000'; e.fillRect(0, 0, 1024, 1024);
+  const on = HELI.rotor > 0.08;                                   // avionics come alive with the rotor
+  const spd = Math.hypot(HELI.vx, HELI.vz)*1.944, gy = heliGroundAt(HELI.x, HELI.z, HELI.y), alt = Math.max(0, HELI.y - gy)*3.281, vs = HELI.vy*196.85;
+  const hdg = hdgDeg(), t = MFD.t;
+  for(const ctx of [g, e]){
+    for(const k in MFD.screens){
+      const [x, y, w, h] = MFD.screens[k];
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+      ctx.fillStyle = '#05080a'; ctx.fillRect(x, y, w, h);
+      if(on || k === 'clk') drawScreen(ctx, k, x, y, w, h, {spd, alt, vs, hdg, t});
+      ctx.restore();
+    }
+    if(on) for(const [cx, cy, r, kind] of MFD.dials) drawDial(ctx, cx, cy, r, kind, {spd, alt, vs});
+  }
+  // keep the glass look on the panel texture: a faint sheen over the screens
+  g.fillStyle = 'rgba(160,190,200,.06)';
+  for(const k in MFD.screens){ const [x, y, w, h] = MFD.screens[k]; g.fillRect(x, y, w, h); }
+  MFD.tex.needsUpdate = true; MFD.etex.needsUpdate = true;
+}
+function txt(ctx, s, x, y, size, col, align){ ctx.font = `600 ${size}px ui-monospace, Menlo, Consolas, monospace`; ctx.fillStyle = col; ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle'; ctx.fillText(s, x, y); }
+function drawScreen(ctx, k, x, y, w, h, d){
+  const G = '#3cff7a', C = '#4fe3ff', W = '#e8f2f4', A = '#ffb020', M = '#ff4fd8';
+  if(k === 'pfd' || k === 'pfd2'){
+    // attitude: horizon tilts with roll and slides with pitch
+    const cx = x + w/2, cy = y + h/2;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-HELI.roll); ctx.translate(0, HELI.pitch*h*1.2);
+    ctx.fillStyle = '#1d6fc4'; ctx.fillRect(-w, -h*2, w*2, h*2);
+    ctx.fillStyle = '#7a4b22'; ctx.fillRect(-w, 0, w*2, h*2);
+    ctx.strokeStyle = W; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-w, 0); ctx.lineTo(w, 0); ctx.stroke();
+    ctx.lineWidth = 1.5;
+    for(let p=-30;p<=30;p+=10){ if(!p) continue; const py = -p*h/90, hw = p%20 ? 14 : 24; ctx.beginPath(); ctx.moveTo(-hw, py); ctx.lineTo(hw, py); ctx.stroke(); txt(ctx, String(Math.abs(p)), hw + 4, py, 10, W); }
+    ctx.restore();
+    // aircraft symbol
+    ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(cx - 34, cy); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx, cy + 8); ctx.lineTo(cx + 10, cy); ctx.lineTo(cx + 34, cy); ctx.stroke();
+    // speed and altitude tapes
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x, y, 36, h); ctx.fillRect(x + w - 44, y, 44, h);
+    txt(ctx, Math.round(d.spd), x + 18, cy, 15, W, 'center'); txt(ctx, 'KT', x + 18, y + 10, 9, C, 'center');
+    txt(ctx, Math.round(d.alt), x + w - 22, cy, 14, W, 'center'); txt(ctx, 'FT', x + w - 22, y + 10, 9, C, 'center');
+    ctx.strokeStyle = W; ctx.lineWidth = 1.5; ctx.strokeRect(x + 2, cy - 11, 32, 22); ctx.strokeRect(x + w - 42, cy - 11, 40, 22);
+    // heading strip
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x + 36, y + h - 18, w - 80, 18);
+    txt(ctx, String(Math.round(d.hdg)).padStart(3, '0') + '°', x + w/2, y + h - 9, 12, G, 'center');
+    if(k === 'pfd2') txt(ctx, 'COPLT', x + 40, y + 10, 9, C);
+  } else if(k === 'nav'){
+    // moving map, north up, 250 m across
+    const cx = x + w/2, cy = y + h/2, sc = w/260;
+    const P2 = (wx, wz) => [cx + (wx - HELI.x)*sc, cy - (wz - HELI.z)*sc];
+    ctx.strokeStyle = 'rgba(79,227,255,.35)'; ctx.lineWidth = 1;
+    for(const r of [30, 60]){ ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke(); }
+    ctx.strokeStyle = '#2fb5ff'; ctx.lineWidth = 2; ctx.beginPath();
+    for(let z=-220; z<=220; z+=10){ const [px, py] = P2(shoreX(z), z); z === -220 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); } ctx.stroke();
+    ctx.strokeStyle = '#c9b48a'; ctx.lineWidth = 1.5; { const [a, b] = P2(-45.5, 45.5), [c2, d2] = P2(45.5, -45.5); ctx.strokeRect(a, b, c2 - a, d2 - b); }
+    { const [ix, iy] = P2(ISLE.x, ISLE.z); ctx.fillStyle = '#a08a5a'; ctx.beginPath(); ctx.arc(ix, iy, ISLE.r*sc, 0, 7); ctx.fill(); }
+    { const [bx, by] = P2(BIM.x, BIM.z); ctx.fillStyle = '#eb1c24'; ctx.fillRect(bx - 4, by - 4, 8, 8); txt(ctx, 'BIM', bx + 6, by, 9, W); }
+    { const [hx, hy] = P2(51.8, -33); txt(ctx, 'H', hx, hy, 11, M, 'center'); }
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-HELI.h + Math.PI); ctx.fillStyle = '#ffd400'; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(6, 7); ctx.lineTo(0, 3); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill(); ctx.restore();
+    txt(ctx, 'MAP  N↑', x + 6, y + 10, 10, C); txt(ctx, String(Math.round(d.hdg)).padStart(3, '0') + '°', x + w - 6, y + 10, 10, G, 'right');
+    txt(ctx, 'RNG 0.1NM', x + 6, y + h - 9, 9, W);
+  } else if(k === 'eng'){
+    const r = HELI.rotor, load = 0.45 + Math.min(0.4, Math.abs(HELI.vy)*0.03 + Math.hypot(HELI.vx, HELI.vz)*0.008) + Math.sin(d.t*3)*0.01;
+    const bars = [['TRQ1', r*load*100, 100], ['TRQ2', r*load*98, 100], ['N1', 60 + r*37, 105], ['T4', 380 + r*load*420, 900]];
+    txt(ctx, 'ENGINE', x + 6, y + 10, 10, C);
+    bars.forEach(([lab, v, mx], i) => {
+      const bx = x + 14 + i*48, by = y + 26, bh = h - 50;
+      ctx.strokeStyle = '#5a6b70'; ctx.strokeRect(bx, by, 18, bh);
+      const f = clamp(v/mx, 0, 1), hot = f > 0.9;
+      ctx.fillStyle = hot ? A : G; ctx.fillRect(bx + 2, by + bh - f*(bh - 4) - 2, 14, f*(bh - 4));
+      txt(ctx, lab, bx + 9, y + h - 16, 9, W, 'center'); txt(ctx, String(Math.round(v)), bx + 9, y + h - 5, 9, hot ? A : G, 'center');
+    });
+    txt(ctx, 'FUEL ' + (612 - Math.floor(d.t*0.2)%200) + ' KG', x + w - 6, y + 10, 9, G, 'right');
+  } else if(k === 'com'){
+    txt(ctx, 'COM1', x + 8, y + 16, 11, C); txt(ctx, '118.700', x + w - 8, y + 16, 14, G, 'right');
+    txt(ctx, 'COM2', x + 8, y + 40, 11, C); txt(ctx, '121.500', x + w - 8, y + 40, 14, W, 'right');
+    txt(ctx, 'NAV1', x + 8, y + 64, 11, C); txt(ctx, '112.30', x + w - 8, y + 64, 14, W, 'right');
+    txt(ctx, 'XPDR', x + 8, y + 90, 11, C); txt(ctx, '7000  ALT', x + w - 8, y + 90, 13, G, 'right');
+  } else if(k === 'wrn'){
+    txt(ctx, 'CAD', x + 8, y + 12, 10, C);
+    const msgs = [];
+    if(HELI.rotor < 0.85) msgs.push(['ROTOR RPM LOW', A]);
+    if(d.alt < 30 && !HELI.landed && d.vs < -400) msgs.push(['SINK RATE', A]);
+    if(HELI.landed) msgs.push(['WOW  ON GROUND', W]);
+    msgs.push(['FUEL PUMP 1/2', G], ['GEN 1/2  ON', G], ['HYD  NORM', G]);
+    msgs.slice(0, 5).forEach(([m, c], i) => txt(ctx, m, x + 8, y + 32 + i*18, 11, (c === A && Math.floor(d.t*2)%2) ? '#7a5410' : c));
+  } else if(k === 'gps'){
+    const lat = 41.0151 + HELI.z*0.000009, lon = 28.9795 + HELI.x*0.000012;
+    txt(ctx, 'GPS  3D FIX', x + 8, y + 14, 11, G);
+    txt(ctx, 'N ' + lat.toFixed(4) + '°', x + 8, y + 38, 12, W); txt(ctx, 'E ' + lon.toFixed(4) + '°', x + 8, y + 58, 12, W);
+    txt(ctx, 'GS ' + Math.round(d.spd) + ' KT', x + 8, y + 82, 12, C); txt(ctx, 'VS ' + Math.round(d.vs), x + w - 8, y + 82, 12, C, 'right');
+    txt(ctx, 'WPT BIM', x + 8, y + 106, 11, M);
+  } else if(k === 'clk'){
+    const dt = new Date();
+    txt(ctx, dt.toTimeString().slice(0, 8), x + w/2, y + h/2 - 10, 18, G, 'center');
+    txt(ctx, 'LCL', x + w/2, y + h/2 + 18, 10, C, 'center');
+  }
+}
+function drawDial(ctx, cx, cy, r, kind, d){
+  ctx.fillStyle = '#06090b'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#d8e2e4'; ctx.lineWidth = 1.5;
+  for(let i=0;i<=10;i++){ const a = Math.PI*0.75 + i/10*Math.PI*1.5; ctx.beginPath(); ctx.moveTo(cx + Math.cos(a)*r*0.78, cy + Math.sin(a)*r*0.78); ctx.lineTo(cx + Math.cos(a)*r*0.93, cy + Math.sin(a)*r*0.93); ctx.stroke(); }
+  const v = kind === 'rpm' ? HELI.rotor : kind === 'alt' ? (d.alt % 1000)/1000 : kind === 'vsi' ? clamp(0.5 + d.vs/4000, 0, 1) : kind === 'spd' ? clamp(d.spd/160, 0, 1) : clamp(HELI.rotor*0.55 + Math.abs(HELI.vy)*0.02, 0, 1);
+  const a = Math.PI*0.75 + v*Math.PI*1.5;
+  ctx.strokeStyle = kind === 'rpm' && HELI.rotor < 0.85 ? '#ffb020' : '#ffffff'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a)*r*0.8, cy + Math.sin(a)*r*0.8); ctx.stroke();
+  txt(ctx, kind.toUpperCase(), cx, cy + r*0.45, 9, '#4fe3ff', 'center');
+}
+function tickCockpit(dt){
+  if(!MFD.g) return;
+  MFD.t += dt;
+  const near = P.heli || (HELI.rotor > 0.05 && camera.position.distanceTo(HELI.g.position) < 25);
+  MFD.acc = (MFD.acc || 0) + dt;
+  if(near && MFD.acc > 0.1){ MFD.acc = 0; drawCockpit(); }
 }
 function heliGroundAt(x, z, y){
   // terrain or water surface, or the top of anything solid we're over (roofs, the tower deck)
@@ -3136,6 +3287,7 @@ function heliTick(dt, t){
     placeHeli();
   }
   if(HELI.mixer){ HELI.act.timeScale = HELI.rotor*4.5; HELI.mixer.update(dt); }
+  tickCockpit(dt);
   if(HELI.disc) HELI.disc.material.opacity = Math.max(0, HELI.rotor - 0.5)*0.22;
   // others hear it too, quieter with distance
   if(!P.heli){
