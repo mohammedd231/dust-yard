@@ -23,3 +23,4 @@ W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam 
 - Slipper: "BOM SLIPPER" by berkayege (https://sketchfab.com/berkayege), CC BY 4.0.
 - Egg box: "Egg box" by Antoine Dresen (https://sketchfab.com/adresen), CC BY 4.0. Simplified for the web.
 - BIM name and logo belong to BİM Birleşik Mağazalar A.Ş.; used here in a private fan game among friends.
+- Helicopter: "EC 135" by GRIP420 (https://sketchfab.com/GRIP420), CC BY 4.0. Textures recompressed and mesh simplified for the web.
