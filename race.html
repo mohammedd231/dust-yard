@@ -157,7 +157,7 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000), new THREE.Mes
 ground.rotation.x = -Math.PI/2; ground.position.y = -6; scene.add(ground);
 
 /* ---------- track data ---------- */
-let TD = null, HQ = null, DIST = null, CL = null, CLLEN = 0, CUM = null;
+let TRACK = null, ROADMASK = null, TD = null, HQ = null, DIST = null, CL = null, CLLEN = 0, CUM = null;
 function cellIndex(x, z){ const i = Math.floor((x - TD.x0)/TD.cell), j = Math.floor((z - TD.z0)/TD.cell); return [clamp(i,0,TD.w-1), clamp(j,0,TD.h-1)]; }
 function heightAt(x, z){
   const fx = (x - TD.x0)/TD.cell - 0.5, fz = (z - TD.z0)/TD.cell - 0.5;
@@ -194,7 +194,7 @@ fetch('models/f1/track_height.bin').then(r => r.arrayBuffer()).then(buf => { win
 const loader = new THREE.GLTFLoader();
 loader.load('models/f1/track.glb', g => {
   g.scene.traverse(o => { if(o.isMesh){ o.receiveShadow = true; o.castShadow = false; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { if(m.map) m.map.anisotropy = renderer.capabilities.getMaxAnisotropy(); if(m.transparent || m.alphaTest) { m.alphaTest = Math.max(m.alphaTest || 0, 0.4); m.transparent = false; } }); } });
-  scene.add(g.scene); progress();
+  scene.add(g.scene); TRACK = g.scene; progress();
 }, undefined, () => fail('circuit'));
 /* ---------- wheels ----------
    The model has no separate wheel objects (tyres share meshes with the bodywork),
@@ -286,17 +286,71 @@ const S = { x:0, z:0, y:0, h:0, vx:0, vz:0, steer:0, throttle:0, brake:0, idx:0,
 const keys = {};
 function placeOnTrack(i, ahead){
   const N = CL.length, a = CL[(i + N) % N], b = CL[(i + 3 + N) % N];
-  S.x = a.x; S.z = a.z; S.h = Math.atan2(b.x - a.x, b.z - a.z); S.vx = S.vz = 0; S.steer = 0; S.idx = (i + N) % N; S.lastIdx = S.idx;
+  S.x = a.x; S.z = a.z; S.h = Math.atan2(b.x - a.x, b.z - a.z); S.vx = S.vz = 0; S.r = 0; S.ax = S.ay = 0; S.steer = 0; S.idx = (i + N) % N; S.lastIdx = S.idx;
 }
 let bestSplits = store.get('bestSplits', null), curSplits = [];
 function ready(){
   HQ = new Uint16Array(window.__hb, 0, TD.w*TD.h); DIST = new Uint8Array(window.__hb, TD.w*TD.h*2, TD.w*TD.h);
+  if(window.__hb.byteLength >= TD.w*TD.h*4) ROADMASK = new Uint8Array(window.__hb, TD.w*TD.h*3, TD.w*TD.h);
+  try { grassOverSideRoads(); } catch(e){ console.warn('side roads', e); }
   placeOnTrack(CL.length - 10);
   scene.add(shadowBlob);
   drawMapBase();
   $('mStatus').textContent = 'Ready. Lights out when you press Start.';
   $('startBtn').disabled = false;
   updateCar(0);
+}
+
+/* ---------- side roads ----------
+   The circuit model also carries the other Shanghai layouts, the pit lane and service roads.
+   Only the race line counts: DIST (rebuilt from the racing line) treats them as grass and
+   walls, and here their tarmac is repainted as grass so they don't look drivable. */
+function attrGet(a, i, c){ let v = c === 0 ? a.getX(i) : c === 1 ? a.getY(i) : a.getZ(i); if(a.normalized){ const A = a.isInterleavedBufferAttribute ? a.data.array : a.array; v = A instanceof Int16Array ? Math.max(v/32767, -1) : A instanceof Uint16Array ? v/65535 : A instanceof Int8Array ? Math.max(v/127, -1) : A instanceof Uint8Array ? v/255 : v; } return v; }
+function grassOverSideRoads(){
+  if(!TRACK) return;
+  TRACK.updateMatrixWorld(true);
+  const meshes = []; TRACK.traverse(o => { if(o.isMesh && o.geometry.index) meshes.push(o); });
+  // average colour of each material's texture, to tell grass and gravel from tarmac, kerbs and paint
+  const cv = document.createElement('canvas'); cv.width = cv.height = 8; const c2 = cv.getContext('2d'), tint = new Map();
+  const colourOf = m => { if(tint.has(m)) return tint.get(m); let r = 255, g = 255, b = 255;
+    try { if(m.map && m.map.image){ c2.clearRect(0, 0, 8, 8); c2.drawImage(m.map.image, 0, 0, 8, 8); const px = c2.getImageData(0, 0, 8, 8).data; r = g = b = 0; for(let i = 0; i < px.length; i += 4){ r += px[i]; g += px[i+1]; b += px[i+2]; } r /= 64; g /= 64; b /= 64; } } catch(e){}
+    const out = [r*m.color.r, g*m.color.g, b*m.color.b]; tint.set(m, out); return out; };
+  const isGreen = ([r, g, b]) => g >= r - 4 && g > b + 12, isSand = ([r, g, b]) => r > b + 22 && g > b + 12 && r > 120;
+  // the grass is whatever green surface turns up most often just off the circuit
+  const ray = new THREE.Raycaster(), down = new V3(0, -1, 0), hits = new Map();
+  for(let k = 0; k < 1500 && hits.size < 60; k++){
+    const x = TD.x0 + Math.random()*TD.w*TD.cell, z = TD.z0 + Math.random()*TD.h*TD.cell, d = distAt(x, z);
+    if(d < 6 || d > 24 || (ROADMASK && ROADMASK[cellIndex(x, z)[1]*TD.w + cellIndex(x, z)[0]])) continue;
+    ray.set(new V3(x, 200, z), down); const h = ray.intersectObjects(meshes, false)[0];
+    if(h && h.object.material.map && isGreen(colourOf(h.object.material))) hits.set(h.object.material, (hits.get(h.object.material) || 0) + 1);
+  }
+  let grass = null; for(const [m, c] of hits) if(!grass || c > hits.get(grass)) grass = m;
+  const gm = new THREE.MeshLambertMaterial({ color:0xffffff, map: grass ? grass.map.clone() : null, polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1 });
+  if(gm.map){ gm.map.wrapS = gm.map.wrapT = THREE.RepeatWrapping; gm.map.repeat.set(1, 1); gm.map.offset.set(0, 0); gm.map.rotation = 0; gm.map.needsUpdate = true; gm.color.copy(grass.color); } else gm.color.set(0x5d6b3c);
+  const P = [], UV = [], v = [new V3(), new V3(), new V3()], e1 = new V3(), e2 = new V3();
+  for(const o of meshes){
+    if(o.material === grass) continue;
+    const c = colourOf(o.material); if(isGreen(c) || isSand(c)) continue;
+    const pos = o.geometry.attributes.position, idx = o.geometry.index.array, keep = [];
+    let moved = 0;
+    for(let t = 0; t < idx.length; t += 3){
+      for(let k = 0; k < 3; k++) v[k].set(attrGet(pos, idx[t+k], 0), attrGet(pos, idx[t+k], 1), attrGet(pos, idx[t+k], 2)).applyMatrix4(o.matrixWorld);
+      const cx = (v[0].x + v[1].x + v[2].x)/3, cz = (v[0].z + v[1].z + v[2].z)/3, cy = (v[0].y + v[1].y + v[2].y)/3;
+      const d = distAt(cx, cz);
+      const [ci, cj] = cellIndex(cx, cz);
+      let side = ((d >= 3 && d <= 34) || (ROADMASK && ROADMASK[cj*TD.w + ci])) && Math.abs(cy - heightAt(cx, cz)) < 0.45;
+      if(side){ e1.subVectors(v[1], v[0]); e2.subVectors(v[2], v[0]); const n = e1.cross(e2); side = Math.abs(n.y) > 0.85*n.length(); }
+      if(side){ for(let k = 0; k < 3; k++){ P.push(v[k].x, v[k].y + 0.01, v[k].z); UV.push(v[k].x/9, v[k].z/9); } moved++; }
+      else keep.push(idx[t], idx[t+1], idx[t+2]);
+    }
+    if(moved) o.geometry.setIndex(new THREE.BufferAttribute(new (pos.count > 65535 ? Uint32Array : Uint16Array)(keep), 1));
+  }
+  if(!P.length) return;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
+  const nrm = new Float32Array(P.length); for(let i = 1; i < nrm.length; i += 3) nrm[i] = 1; g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  const gmesh = new THREE.Mesh(g, gm); gmesh.receiveShadow = true; scene.add(gmesh);
+  window.__sideRoads = { moved: P.length/9, grass: grass && grass.name, grassCol: grass && colourOf(grass).map(Math.round) };
 }
 
 /* ---------- input ---------- */
@@ -334,7 +388,8 @@ function initAudio(){
     const a = mk('sawtooth', 0.16), b = mk('square', 0.06), c = mk('sawtooth', 0.05);
     const nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), d = nb.getChannelData(0); for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
     const ns = ctx.createBufferSource(); ns.buffer = nb; ns.loop = true; const nf = ctx.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = 900; const ng = ctx.createGain(); ng.gain.value = 0; ns.connect(nf); nf.connect(ng); ng.connect(master); ns.start();
-    audio = {ctx, master, lp, a, b, c, ng};
+    const ns2 = ctx.createBufferSource(); ns2.buffer = nb; ns2.loop = true; const sq = ctx.createBiquadFilter(); sq.type = 'bandpass'; sq.frequency.value = 1700; sq.Q.value = 6; const sg = ctx.createGain(); sg.gain.value = 0; ns2.connect(sq); sq.connect(sg); sg.connect(master); ns2.start();
+    audio = {ctx, master, lp, a, b, c, ng, sg, sq};
   }catch(e){ audio = null; }
 }
 function engineSound(rpm, load, speed){
@@ -345,44 +400,89 @@ function engineSound(rpm, load, speed){
   audio.lp.frequency.setTargetAtTime(900 + load*2600 + rpm*0.08, t, 0.05);
   audio.a.gn.gain.setTargetAtTime(0.06 + load*0.14, t, 0.05);
   audio.ng.gain.setTargetAtTime(Math.min(0.25, speed/90*0.25), t, 0.1);
+  if(audio.sg){ audio.sg.gain.setTargetAtTime(speed > 4 ? (S.slip || 0)*0.35 : 0, t, 0.05); audio.sq.frequency.setTargetAtTime(1400 + (S.slip || 0)*900, t, 0.1); }
 }
 
-/* ---------- physics (arcade) ---------- */
+/* ---------- physics ----------
+   Bicycle model with real tyre slip: each axle makes a sideways force from its slip angle
+   (Pacejka-style curve that peaks around 7 degrees and then falls off), capped by
+   grip x load. Load = weight + aerodynamic downforce (grows with speed squared) +
+   weight transfer under braking/acceleration. So the faster you go the harder the
+   car is pressed down and the more it can corner, but the tighter a corner the
+   slower you must take it; overdo the steering and the fronts wash wide, brake while
+   turning and the fronts lose bite, floor it mid-corner and the rear steps out. */
 const VMAX = 93, WB = 3.6;                          // ~335 km/h, wheelbase
 const GEARS = [0, 22, 32, 42, 52, 62, 72, 82, 95];  // gear top speeds m/s
+const CAR = { m:800, Iz:1150, a:1.98, b:1.62, h:0.30, mu:1.75, ClA:4.2, aeroF:0.42, CdA:1.05, power:585000, Fmax:9200, Bf:11, Br:15, rearMu:1.08, C:1.35, G:9.81, rho:1.225 };
+function tyre(alpha, Dmax, B){ return Dmax*Math.sin(CAR.C*Math.atan(B*alpha)); }
 function step(dt){
   const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(p => p) : null;
   let thr = (keys.KeyW || keys.ArrowUp) ? 1 : 0, brk = (keys.KeyS || keys.ArrowDown) ? 1 : 0;
   let st = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0);
   if(gp){ thr = Math.max(thr, gp.buttons[7] ? gp.buttons[7].value : 0); brk = Math.max(brk, gp.buttons[6] ? gp.buttons[6].value : 0); const ax = gp.axes[0] || 0; if(Math.abs(ax) > 0.08) st = -ax; }
-  if(!S.running){ thr = 0; brk = 0; S.vx = S.vz = 0; }
-  const fx = Math.sin(S.h), fz = Math.cos(S.h), rx = Math.cos(S.h), rz = -Math.sin(S.h);
-  let vf = S.vx*fx + S.vz*fz, vl = S.vx*rx + S.vz*rz;
+  if(!S.running){ thr = 0; brk = 0; S.vx = S.vz = 0; S.r = 0; }
+  // steering: the wheel turns less at speed (like a real driver's hands), but grip is what decides the turn
+  const v0 = Math.hypot(S.vx, S.vz);
+  const maxSteer = 0.36 / (1 + v0/34);
+  S.steer = lerp(S.steer, st*maxSteer, 1 - Math.exp(-dt*(st === 0 ? 12 : 8)));
   const off = distAt(S.x, S.z), onGrass = off > 2, gravel = off > 6;
-  const grip = gravel ? 0.35 : onGrass ? 0.55 : 1;
-  // longitudinal
-  let acc = 0;
-  if(thr > 0){ acc += thr * (vf < 0 ? 18 : 13.5*Math.pow(Math.max(0, 1 - vf/VMAX), 0.75) + 0.6); }
-  if(brk > 0){ if(vf > 1) acc -= brk*(32*grip + 4); else if(vf > -9) acc -= brk*6; }
-  acc -= 0.00045*vf*Math.abs(vf) + (onGrass ? 0.045*vf*(gravel ? 2.5 : 1) : 0) + (thr === 0 && brk === 0 ? Math.sign(vf)*0.8 : 0);
-  vf += acc*dt;
-  if(onGrass) vf = Math.min(vf, gravel ? 22 : 38);
-  // steering & yaw
-  const speedAbs = Math.abs(vf);
-  const maxSteer = 0.42 / (1 + speedAbs/22);
-  S.steer = lerp(S.steer, st*maxSteer, 1 - Math.exp(-dt*(st === 0 ? 10 : 7)));
-  let yaw = vf / WB * Math.tan(S.steer);
-  const latMax = (44 + 0.0035*vf*vf) * grip;          // grip grows with downforce
-  if(speedAbs > 1) yaw = clamp(yaw, -latMax/speedAbs, latMax/speedAbs);
-  S.h += yaw*dt;
-  // lateral slip decays with grip (a little slide when you overdo it)
-  vl *= Math.exp(-dt*12*grip);
-  const nfx = Math.sin(S.h), nfz = Math.cos(S.h), nrx = Math.cos(S.h), nrz = -Math.sin(S.h);
-  S.vx = nfx*vf + nrx*vl; S.vz = nfz*vf + nrz*vl;
+  const surf = gravel ? 0.38 : onGrass ? 0.55 : 1;
   const px = S.x, pz = S.z;
-  S.x += S.vx*dt; S.z += S.vz*dt;
+  let rem = Math.min(dt, 0.05), slipMax = 0;
+  while(rem > 1e-6){
+    const fx = Math.sin(S.h), fz = Math.cos(S.h), yx = Math.cos(S.h), yz = -Math.sin(S.h);
+    let vx = S.vx*fx + S.vz*fz, vy = S.vx*yx + S.vz*yz, r = S.r || 0;
+    const sp = Math.abs(vx), d = S.steer, L = CAR.a + CAR.b, mu = CAR.mu*surf;
+    // loads: static + downforce + longitudinal weight transfer
+    const down = 0.5*CAR.rho*CAR.ClA*vx*vx*(onGrass ? 0.85 : 1);
+    const dW = CAR.m*(S.ax || 0)*CAR.h/L;
+    const Fzf = Math.max(800, CAR.m*CAR.G*CAR.b/L + down*CAR.aeroF - dW), Fzr = Math.max(800, CAR.m*CAR.G*CAR.a/L + down*(1 - CAR.aeroF) + dW);
+    // longitudinal forces (drive on the rear, brakes split 58/42, ABS keeps them at the limit)
+    let Fdrive = 0, Fbf = 0, Fbr = 0;
+    if(thr > 0) Fdrive = vx < -0.5 ? thr*8000 : thr*Math.min(CAR.Fmax, CAR.power/Math.max(vx, 1));
+    if(brk > 0){
+      if(vx > 0.8){ const Fb = brk*Math.min(mu*(Fzf + Fzr)*0.97, 58000); Fbf = Fb*0.58; Fbr = Fb*0.42; }
+      else if(vx > -8) Fdrive -= brk*7000;            // reverse
+    }
+    // slip angles and tyre forces (friction ellipse per axle)
+    const vxs = Math.max(sp, 0.5);
+    const af = d - Math.atan2(vy + CAR.a*r, vxs)*Math.sign(vx || 1), ar = -Math.atan2(vy - CAR.b*r, vxs)*Math.sign(vx || 1);
+    const Df = mu*Fzf, Dr = mu*CAR.rearMu*Fzr;   // wider rear tyres: more, and stiffer, grip at the back = stable
+    let Fyr = tyre(ar, Dr, CAR.Br);
+    // ABS per axle; the rear brakes never take the grip the rear needs to stay in line
+    Fbf = Math.min(Fbf, Df*0.95); Fbr = Math.min(Fbr, Math.sqrt(Math.max(0, Dr*Dr - Fyr*Fyr))*0.95);
+    const Fyf = tyre(af, Math.sqrt(Math.max(0, Df*Df - Fbf*Fbf)), CAR.Bf);
+    // traction control: keep enough rear grip for the corner, then the rest can go to the road
+    const rearLeft = Math.sqrt(Math.max(0, Dr*Dr - Fyr*Fyr));
+    if(Fdrive > rearLeft) Fdrive = rearLeft*0.98 + (Fdrive - rearLeft)*0.15;   // a little wheelspin gets through
+    const FxR = Fdrive - Fbr*Math.sign(vx), FxF = -Fbf*Math.sign(vx);
+    { const k = Math.hypot(FxR, Fyr)/Math.max(Dr, 1); if(k > 1) Fyr /= k; }
+    const drag = 0.5*CAR.rho*CAR.CdA*vx*Math.abs(vx) + (sp > 0.3 ? Math.sign(vx)*(0.015*CAR.m*CAR.G + (thr === 0 && brk === 0 ? 1400 : 0)) : 0)
+      + (onGrass ? CAR.m*0.045*vx*(gravel ? 2.5 : 1) : 0);
+    const cd = Math.cos(d), sd = Math.sin(d);
+    // step size: small enough for stiff tyres at low speed
+    const Cf = CAR.Bf*CAR.C*Df, Cr = CAR.Br*CAR.C*Dr, eig = (CAR.a*CAR.a*Cf + CAR.b*CAR.b*Cr)/(CAR.Iz*vxs) + (Cf + Cr)/(CAR.m*vxs);
+    const h = Math.min(rem, 1/240, 0.6/eig); rem -= h;
+    let ax = (FxR + FxF*cd - Fyf*sd - drag)/CAR.m;
+    vx += (ax + vy*r)*h;
+    if(sp < 0.3 && thr === 0 && brk === 0) vx *= Math.exp(-h*4);
+    const kin = clamp((sp - 3)/5, 0, 1);              // below ~3 m/s just roll like a cart
+    if(kin > 0){
+      const ay = (Fyf*cd + Fyr + FxF*sd)/CAR.m, rd = (CAR.a*(Fyf*cd + FxF*sd) - CAR.b*Fyr)/CAR.Iz;
+      vy += (ay - vx*r)*h*kin; r += rd*h*kin;
+      S.ay = ay; slipMax = Math.max(slipMax, Math.abs(af) - 0.13, Math.abs(ar) - 0.11, Fdrive > rearLeft ? 0.05 : 0);
+    }
+    if(kin < 1){ const rk = vx/L*Math.tan(d); r = lerp(rk, r, kin); vy *= Math.exp(-h*10*(1 - kin)); }
+    if(onGrass && vx > (gravel ? 22 : 38)) vx = lerp(vx, gravel ? 22 : 38, 1 - Math.exp(-h*3));
+    S.ax = lerp(S.ax || 0, ax, 1 - Math.exp(-h*10));
+    S.h += r*h; S.r = r;
+    const nfx = Math.sin(S.h), nfz = Math.cos(S.h), nyx = Math.cos(S.h), nyz = -Math.sin(S.h);
+    S.vx = nfx*vx + nyx*vy; S.vz = nfz*vx + nyz*vy;
+    S.x += S.vx*h; S.z += S.vz*h;
+  }
+  S.slip = lerp(S.slip || 0, clamp(slipMax*6, 0, 1), 1 - Math.exp(-dt*10));
   // barrier: too far from the tarmac
-  if(distAt(S.x, S.z) > 24){ S.x = px; S.z = pz; S.vx *= -0.25; S.vz *= -0.25; bump(); }
+  if(distAt(S.x, S.z) > 24){ S.x = px; S.z = pz; S.vx *= -0.25; S.vz *= -0.25; S.r = 0; bump(); }
   S.throttle = thr; S.brake = brk;
   // track progress
   const N = CL.length;
@@ -418,11 +518,13 @@ function updateCar(dt){
   car.position.set(S.x, S.y + 0.02, S.z);
   car.rotation.set(0, S.h, 0);
   const vf = S.vx*fx + S.vz*fz;
-  body.rotation.set(S.pitch + (S.brake ? 0.012 : 0) - (S.throttle ? 0.006 : 0), 0, S.roll - S.steer*Math.min(1, Math.abs(vf)/40)*0.03);
+  S.dive = lerp(S.dive || 0, clamp(-(S.ax || 0)*0.0011, -0.012, 0.03), 1 - Math.exp(-dt*9)); S.lean = lerp(S.lean || 0, clamp(-(S.ay || 0)*0.0007, -0.035, 0.035), 1 - Math.exp(-dt*9));
+  body.rotation.set(S.pitch + S.dive, 0, S.roll + S.lean);
   // wheels: roll with speed (nose is model -Z, so forward roll is -X rotation) and steer the fronts
   const roll = vf*dt / wheelR;
   WHEELS.forEach(w => { w.spin.rotation.x -= roll; if(w.front) w.steer.rotation.y = S.steer; });
-  if(bumpT > 0){ bumpT -= dt; body.position.y = Math.sin(bumpT*80)*0.03; } else body.position.y = 0;
+  const squat = -Math.min(0.035, vf*vf*0.0000045);   // downforce pushes the car onto its springs
+  if(bumpT > 0){ bumpT -= dt; body.position.y = squat + Math.sin(bumpT*80)*0.03; } else body.position.y = squat;
   shadowBlob.position.set(S.x, S.y + 0.03, S.z); shadowBlob.rotation.z = -S.h;
   sun.position.set(S.x + 120, S.y + 260, S.z + 80); sun.target.position.set(S.x, S.y, S.z);
   sky.position.copy(camera.position);
