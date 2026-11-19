@@ -749,6 +749,7 @@ function landClamp(p, swimmer){
   // Island: a flat sandy top that shelves away under the water
   const prof = [[0,0.02],[ISLE.r,0.02],[ISLE.r+1.2,-0.25]]; for(let e = 3; e <= 40; e += 2.5) prof.push([ISLE.r + e, -Math.min(12, e*0.22 + 0.006*e*e)]); prof.push([ISLE.r + 42, -12.4]);
   for(const q of prof) q.splice(0, 2, new THREE.Vector2(q[0], q[1])); prof.forEach((q, i) => prof[i] = q[0]);
+  prof.reverse();   // bottom-up so the faces point out and up (top-down left the island's top invisible from above)
   const isle = new THREE.Mesh(new THREE.LatheGeometry(prof, 56), sandMat);
   isle.position.set(ISLE.x, 0, ISLE.z); isle.receiveShadow = true; scene.add(isle);
   // Palms (trunks block bullets and players)
@@ -2650,7 +2651,7 @@ function exitBoat(forced){
       const dx = BOAT.x - ISLE.x, dz = BOAT.z - ISLE.z, d = Math.hypot(dx, dz);
       if(d < ISLE.r + 13) land = new V3(ISLE.x + dx/d*(ISLE.r - 1), 0, ISLE.z + dz/d*(ISLE.r - 1));
     }
-    if(!land){ banner('Too far from land', 'Paddle to the beach, the jetty or the island'); return; }
+    if(!land){ const rx = Math.cos(BOAT.h), rz = -Math.sin(BOAT.h); land = new V3(BOAT.x + rx*1.6, 0, BOAT.z + rz*1.6); land.y = waveAt(land.x, land.z) - 1.45; P.swim = true; }
     if(colliders.some(c => overlaps(land, 1.8, c)) && land.y < 0.1) land.add(new V3(-fx, 0, -fz));
   }
   P.boat = false; BOAT.driver = null; BOAT.v = 0; BOAT.turn = 0; BOAT.stamp = Date.now();
@@ -3758,7 +3759,7 @@ function exitJet(forced){
     if(nearJetty) land = new V3(JETTY.x1 - 0.6, 0.14, JETTY.z);
     else if(JET.x < shoreX(JET.z) + 14 && Math.abs(JET.z) < 43.5){ const z = clamp(JET.z, -43.5, 43.5), x = shoreX(z) + 1.2; land = new V3(x, groundAt(x, z), z); }
     else { const dx = JET.x - ISLE.x, dz = JET.z - ISLE.z, d = Math.hypot(dx, dz); if(d < ISLE.r + 13) land = new V3(ISLE.x + dx/d*(ISLE.r - 1), 0, ISLE.z + dz/d*(ISLE.r - 1)); }
-    if(!land){ banner('Too far from land', 'Ride to the beach, the jetty or the island'); return; }
+    if(!land){ const rx = Math.cos(JET.h), rz = -Math.sin(JET.h); land = new V3(JET.x + rx*1.5, 0, JET.z + rz*1.5); land.y = waveAt(land.x, land.z) - 1.45; P.swim = true; }   // hop off into the sea and swim
   }
   P.jet = false; JET.driver = null; JET.v = 0; JET.thr = 0; JET.steer = 0; JET.stamp = Date.now();
   P.crouch = false; P.h = 1.8; P.eye = 1.62;
@@ -3937,17 +3938,17 @@ const UW = { on:false, k:0, fogC:new THREE.Color(), airFogC:new THREE.Color(HORI
 const shaftMats = [], SHAFTS = [];
 {
   const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0, -0.5, 0);
-  for(let i = 0; i < 26; i++){
+  for(let i = 0; i < 40; i++){
     const m = new THREE.ShaderMaterial({ transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide, fog:false,
       uniforms:{ uTime:{value:0}, uSeed:{value:Math.random()*10}, uI:{value:0}, uFar:{value:1} },
       vertexShader:'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position, 1.0); }',
       fragmentShader:`varying vec2 vUv; uniform float uTime, uSeed, uI, uFar;
         void main(){
           float across = 1.0 - abs(vUv.x*2.0 - 1.0); across = across*across*(3.0 - 2.0*across);
-          float down = 1.0 - vUv.y;                       // 1 at the top (surface), 0 at the bottom
+          float down = vUv.y;                             // 1 at the top (surface), 0 at the bottom
           float streak = 0.65 + 0.35*sin(vUv.x*9.0 + uSeed*3.0 + uTime*0.4);
           float flick = 0.55 + 0.45*sin(uTime*(0.5 + fract(uSeed)*0.6) + uSeed*6.0);
-          float a = across*pow(down, 1.3)*streak*flick*uI*uFar*0.55;
+          float a = across*pow(down, 1.15)*streak*flick*uI*uFar*1.15;
           gl_FragColor = vec4(vec3(0.62, 0.92, 1.0)*a, a);
         }` });
     const mesh = new THREE.Mesh(geo, m); mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 3; scene.add(mesh);
@@ -3962,8 +3963,9 @@ const motes = (() => {
   pts.visible = false; pts.frustumCulled = false; scene.add(pts); return pts;
 })();
 function placeShaft(S, cx, cz, first){
-  const a = Math.random()*Math.PI*2, r = first ? 2 + Math.random()*24 : 14 + Math.random()*12;
-  S.x = cx + Math.cos(a)*r; S.z = cz + Math.sin(a)*r; S.w = 0.8 + Math.random()*2.6; S.l = 9 + Math.random()*10; S.live = true;
+  const a = Math.random()*Math.PI*2, r = first ? 1.5 + Math.random()*22 : 12 + Math.random()*12;
+  S.x = cx + Math.cos(a)*r; S.z = cz + Math.sin(a)*r; S.w = 0.5 + Math.random()*2.8;
+  S.l = Math.max(4, WATER_Y - groundAt(S.x, S.z) + 1.5)*(0.8 + Math.random()*0.35); S.live = true;   // reach down to the sand
 }
 const _sd = new V3(), _sx = new V3(), _sy = new V3(), _sz = new V3(), _sm = new THREE.Matrix4();
 function underwaterTick(dt, t){
