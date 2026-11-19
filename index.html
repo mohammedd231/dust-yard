@@ -3935,26 +3935,41 @@ function splash(v){ if(!AC) return; const out = outNode(v); const t = AC.current
 
 /* underwater look */
 const UW = { on:false, k:0, fogC:new THREE.Color(), airFogC:new THREE.Color(HORIZON), deepC:new THREE.Color(0x0a5a72), shallowC:new THREE.Color(0x1ea7bd) };
-const shaftMats = [], SHAFTS = [];
-{
-  const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0, -0.5, 0);
-  for(let i = 0; i < 40; i++){
-    const m = new THREE.ShaderMaterial({ transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide, fog:false,
-      uniforms:{ uTime:{value:0}, uSeed:{value:Math.random()*10}, uI:{value:0}, uFar:{value:1} },
-      vertexShader:'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position, 1.0); }',
-      fragmentShader:`varying vec2 vUv; uniform float uTime, uSeed, uI, uFar;
-        void main(){
-          float across = 1.0 - abs(vUv.x*2.0 - 1.0); across = across*across*(3.0 - 2.0*across);
-          float down = vUv.y;                             // 1 at the top (surface), 0 at the bottom
-          float streak = 0.65 + 0.35*sin(vUv.x*9.0 + uSeed*3.0 + uTime*0.4);
-          float flick = 0.55 + 0.45*sin(uTime*(0.5 + fract(uSeed)*0.6) + uSeed*6.0);
-          float a = across*pow(down, 1.15)*streak*flick*uI*uFar*1.15;
-          gl_FragColor = vec4(vec3(0.62, 0.92, 1.0)*a, a);
-        }` });
-    const mesh = new THREE.Mesh(geo, m); mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 3; scene.add(mesh);
-    SHAFTS.push({mesh, m, x:0, z:0, w:1, l:10, live:false});
+// Sun rays under water: a fan of long thin beams that all start where the sun's light enters the
+// surface above you and spread down through the water, so from below they converge on the sun.
+const RAYS = (() => {
+  const n = 90, geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(n*4*3), uv = new Float32Array(n*4*2), seed = new Float32Array(n*4), idx = [];
+  const dirs = [];
+  for(let i = 0; i < n; i++){
+    // spread: mostly within ~25 degrees of the sun's line, a few wider
+    const th = Math.pow(Math.random(), 1.4)*0.62, ph = Math.random()*Math.PI*2;
+    dirs.push({th, ph, w:0.5 + Math.random()*2.2, len:30 + Math.random()*28, s:Math.random()*10});
+    for(let k = 0; k < 4; k++){ seed[i*4 + k] = dirs[i].s; uv[(i*4 + k)*2] = k & 1; uv[(i*4 + k)*2 + 1] = k < 2 ? 0 : 1; }
+    const b = i*4; idx.push(b, b + 1, b + 2, b + 2, b + 1, b + 3);
   }
-}
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); geo.setAttribute('seed', new THREE.BufferAttribute(seed, 1)); geo.setIndex(idx);
+  const mat = new THREE.ShaderMaterial({ transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide, fog:false,
+    uniforms:{ uTime:{value:0}, uI:{value:1} },
+    vertexShader:'attribute float seed; varying vec2 vUv; varying float vSeed; varying float vDist; void main(){ vUv = uv; vSeed = seed; vec4 mv = modelViewMatrix*vec4(position, 1.0); vDist = -mv.z; gl_Position = projectionMatrix*mv; }',
+    fragmentShader:`varying vec2 vUv; varying float vSeed; varying float vDist; uniform float uTime, uI;
+      void main(){
+        float across = 1.0 - abs(vUv.x*2.0 - 1.0); across = pow(across, 1.8);
+        float along = vUv.y;                                            // 0 at the surface, 1 at the far end
+        float fade = smoothstep(0.0, 0.03, along)*pow(1.0 - along, 1.4);
+        float flick = 0.55 + 0.45*sin(uTime*(0.35 + fract(vSeed)*0.5) + vSeed*7.0);
+        float a = across*fade*flick*uI*0.75*smoothstep(0.5, 3.0, vDist);
+        gl_FragColor = vec4(vec3(0.70, 0.94, 1.0)*a, a);
+      }` });
+  const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.visible = false; mesh.renderOrder = 3; scene.add(mesh);
+  // the sun itself, a hot star where its light comes through the waves
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128); gr.addColorStop(0, 'rgba(255,255,250,1)'); gr.addColorStop(0.1, 'rgba(245,253,255,.85)'); gr.addColorStop(0.35, 'rgba(170,230,250,.18)'); gr.addColorStop(1, 'rgba(120,210,240,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  const star = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), blending:THREE.AdditiveBlending, depthWrite:false, transparent:true, fog:false}));
+  star.visible = false; star.renderOrder = 4; scene.add(star);
+  return {mesh, mat, dirs, pos, star};
+})();
 const motes = (() => {
   const n = 420, pos = new Float32Array(n*3);
   for(let i = 0; i < n*3; i++) pos[i] = (Math.random() - 0.5)*30;
@@ -3962,12 +3977,7 @@ const motes = (() => {
   const pts = new THREE.Points(g, new THREE.PointsMaterial({color:0xc8f0ff, size:0.045, transparent:true, opacity:0.55, depthWrite:false}));
   pts.visible = false; pts.frustumCulled = false; scene.add(pts); return pts;
 })();
-function placeShaft(S, cx, cz, first){
-  const a = Math.random()*Math.PI*2, r = first ? 1.5 + Math.random()*22 : 12 + Math.random()*12;
-  S.x = cx + Math.cos(a)*r; S.z = cz + Math.sin(a)*r; S.w = 0.5 + Math.random()*2.8;
-  S.l = Math.max(4, WATER_Y - groundAt(S.x, S.z) + 1.5)*(0.8 + Math.random()*0.35); S.live = true;   // reach down to the sand
-}
-const _sd = new V3(), _sx = new V3(), _sy = new V3(), _sz = new V3(), _sm = new THREE.Matrix4();
+const _rA = new V3(), _rD = new V3(), _rU = new V3(), _rS = new V3(), _rT = new V3(), _rE = new V3(), _rQ = new THREE.Quaternion(), _rX = new V3(0, 0, 1);
 function underwaterTick(dt, t){
   const c = camera.position;
   const surf = c.x > 46 ? waveAt(c.x, c.z) : -99;
@@ -3975,7 +3985,7 @@ function underwaterTick(dt, t){
   UW.k += ((under ? 1 : 0) - UW.k)*Math.min(1, dt*14);
   if(under !== UW.on){
     UW.on = under;
-    sky.visible = !under; motes.visible = under; for(const S of SHAFTS){ S.mesh.visible = under; if(under) placeShaft(S, c.x, c.z, true); }
+    sky.visible = !under; motes.visible = under; RAYS.mesh.visible = under; RAYS.star.visible = under;
     if(AC && uwLP) uwLP.frequency.setTargetAtTime(under ? 520 : 20000, AC.currentTime, 0.05);
     if(under) splash(0.35);
   }
@@ -3985,20 +3995,29 @@ function underwaterTick(dt, t){
     UW.fogC.copy(UW.shallowC).lerp(UW.deepC, clamp(depth/10, 0, 1));
     scene.fog.color.copy(UW.fogC); scene.fog.near = 1.0; scene.fog.far = Math.max(26, 48 - depth*1.4);
     scene.background = UW.fogC;
-    // light shafts: hang from the surface, slanted with the sun, turned to face you
-    const sd = skyU.sunDir.value; _sd.set(-sd.x*0.35, -1, -sd.z*0.35).normalize();
-    for(const S of SHAFTS){
-      const dx = S.x - c.x, dz = S.z - c.z, dist = Math.hypot(dx, dz);
-      if(dist > 30) placeShaft(S, c.x, c.z, false);
-      const top = new V3(S.x, waveAt(S.x, S.z) + 0.05, S.z);
-      _sy.copy(_sd).negate();
-      const toCam = c.clone().sub(top); _sx.crossVectors(_sy, toCam).normalize(); _sz.crossVectors(_sx, _sy).normalize();
-      _sm.makeBasis(_sx, _sy, _sz); S.mesh.quaternion.setFromRotationMatrix(_sm);
-      S.mesh.position.copy(top); S.mesh.scale.set(S.w, S.l, 1);
-      S.m.uniforms.uTime.value = t; S.m.uniforms.uI.value = clamp(1.4 - depth*0.06, 0.25, 1.2);
-      const vd = top.clone().addScaledVector(_sd, S.l*0.5).sub(c).normalize(), along = Math.abs(vd.dot(_sd));
-      S.m.uniforms.uFar.value = clamp(1.2 - dist/30, 0, 1)*clamp(dist/2.5, 0, 1)*clamp((1 - along)*3, 0, 1);   // fade when seen end-on
-    }
+    // sun rays: find where the sun's light enters the surface above you, fan the beams down from there
+    const sd = skyU.sunDir.value;
+    _rU.set(sd.x*0.55, 1, sd.z*0.55).normalize();                   // refracted: steeper under water than in air
+    const tUp = Math.max(0.5, (surf - c.y)/_rU.y);
+    _rA.copy(c).addScaledVector(_rU, tUp);                           // the bright point on the surface
+    _rA.y = waveAt(_rA.x, _rA.z) - 0.05;
+    _rQ.setFromUnitVectors(_rX, _rU.clone().negate());
+    const P3 = RAYS.pos;
+    RAYS.dirs.forEach((R, i) => {
+      _rD.set(Math.sin(R.th)*Math.cos(R.ph), Math.sin(R.th)*Math.sin(R.ph), Math.cos(R.th)).applyQuaternion(_rQ);   // beam direction
+      _rE.copy(_rA).addScaledVector(_rD, R.len);
+      _rT.copy(_rA).addScaledVector(_rD, R.len*0.5).sub(c);
+      _rS.crossVectors(_rD, _rT).normalize();                         // beam turned to face you
+      const w0 = R.w*0.05, w1 = R.w*(1 + R.len*0.035);
+      const o = i*12;
+      P3[o] = _rA.x - _rS.x*w0; P3[o + 1] = _rA.y - _rS.y*w0; P3[o + 2] = _rA.z - _rS.z*w0;
+      P3[o + 3] = _rA.x + _rS.x*w0; P3[o + 4] = _rA.y + _rS.y*w0; P3[o + 5] = _rA.z + _rS.z*w0;
+      P3[o + 6] = _rE.x - _rS.x*w1; P3[o + 7] = _rE.y - _rS.y*w1; P3[o + 8] = _rE.z - _rS.z*w1;
+      P3[o + 9] = _rE.x + _rS.x*w1; P3[o + 10] = _rE.y + _rS.y*w1; P3[o + 11] = _rE.z + _rS.z*w1;
+    });
+    RAYS.mesh.geometry.attributes.position.needsUpdate = true;
+    RAYS.mat.uniforms.uTime.value = t; RAYS.mat.uniforms.uI.value = clamp(1.25 - depth*0.05, 0.35, 1.25);
+    RAYS.star.position.copy(_rA); const ss = 1.6 + tUp*0.16; RAYS.star.scale.set(ss, ss, 1);
     // drifting specks
     motes.position.set(Math.floor(c.x/30)*30, 0, Math.floor(c.z/30)*30);
     const pa = motes.geometry.attributes.position, A = pa.array;
