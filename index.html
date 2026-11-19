@@ -184,6 +184,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
   <div class="boatp shopp" id="shopPrompt" hidden></div>
   <div class="boatp" id="heliPrompt" hidden><kbd>E</kbd> Fly the helicopter</div>
   <div class="boatp" id="jetPrompt" hidden><kbd>E</kbd> Ride the jet ski</div>
+  <div class="boatp" id="doorPrompt" hidden><kbd>E</kbd> <span id="doorPromptT">Open the door</span></div>
   <div class="scope" id="scope"><div class="lens"><svg viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
     <g fill="#000" stroke="none"><rect x="0" y="98.4" width="62" height="3.2"/><rect x="138" y="98.4" width="62" height="3.2"/><rect x="98.4" y="138" width="3.2" height="62"/><rect x="98.4" y="0" width="3.2" height="62"/></g>
     <g stroke="#000" stroke-width="0.45"><line x1="62" y1="100" x2="138" y2="100"/><line x1="100" y1="62" x2="100" y2="138"/></g>
@@ -423,10 +424,165 @@ function windows(x, z, w, d, h, floors){
     }
   }
 }
+/* Enterable buildings: hollow walls with real window openings you can see and shoot
+   through, a door you open and close with E, floors with stairs between them.
+   Geometry is merged per building and textured in world space so bricks line up. */
+const WALL_T = 0.3, FLOOR_H = 3.1, SLAB = 0.25, DOORS = [];
+const doorMat = new THREE.MeshStandardMaterial({color:0x8a6a48, roughness:0.85});
+function mergeBoxes(list, scale){
+  // list of [x0,y0,z0,x1,y1,z1] -> one geometry with world-space planar UVs
+  const P = [], N = [], U = [], I = [];
+  for(const [x0, y0, z0, x1, y1, z1] of list){
+    const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0); g.translate((x0 + x1)/2, (y0 + y1)/2, (z0 + z1)/2);
+    const p = g.attributes.position, n = g.attributes.normal, base = P.length/3;
+    for(let i = 0; i < p.count; i++){
+      const px = p.getX(i), py = p.getY(i), pz = p.getZ(i), nx = n.getX(i), ny = n.getY(i);
+      P.push(px, py, pz); N.push(nx, ny, n.getZ(i));
+      if(Math.abs(nx) > 0.5) U.push(pz/scale, py/scale); else if(Math.abs(ny) > 0.5) U.push(px/scale, pz/scale); else U.push(px/scale, py/scale);
+    }
+    for(const k of g.index.array) I.push(base + k);
+    g.dispose();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  geo.setIndex(I); return geo;
+}
 function building(x, z, w, d, h, m){
-  B(x, z, w, d, h, m);
-  B(x, z, w+0.3, d+0.3, 0.45, 'concrete', h);
-  windows(x, z, w, d, h, Math.floor(h/3.1));
+  const solid = [], trim = [], slab = [], frames = [];
+  const box = (arr, x0, y0, z0, x1, y1, z1, col) => { arr.push([x0, y0, z0, x1, y1, z1]); if(col !== false) colliders.push({min:new V3(x0, y0, z0), max:new V3(x1, y1, z1)}); };
+  const floors = Math.max(1, Math.floor((h - 0.4)/FLOOR_H));
+  const rows = []; for(let f = 0; f < floors; f++){ const wy = 1.9 + f*FLOOR_H; if(wy + 0.6 <= h - 0.2) rows.push(wy); }
+  // door goes on the side that faces the middle of the map
+  const faces = [{ax:'z', s: 1}, {ax:'z', s:-1}, {ax:'x', s: 1}, {ax:'x', s:-1}];
+  let doorFace = faces[0], bestDot = -9;
+  for(const f of faces){ const nx = f.ax === 'x' ? f.s : 0, nz = f.ax === 'z' ? f.s : 0, dt = -(nx*x + nz*z)/Math.hypot(x, z); if(dt > bestDot){ bestDot = dt; doorFace = f; } }
+  for(const f of faces){
+    // u runs along the face; z-faces span the full width, x-faces fit between them
+    const len = f.ax === 'z' ? w : d, uLen = f.ax === 'z' ? w : d - 2*WALL_T;
+    const ops = [];
+    const n = Math.floor((len - 1.5)/3.2);
+    for(const wy of rows) for(let i = 0; i < n; i++){
+      const t = (i - (n - 1)/2)*3.2;
+      if(f === doorFace && wy < 3 && Math.abs(t) < 1.5) continue;
+      ops.push([t - 0.5, t + 0.5, wy - 0.6, wy + 0.6]);
+    }
+    if(f === doorFace) ops.push([-0.65, 0.65, 0, 2.3]);
+    const us = new Set([-uLen/2, uLen/2]); for(const o of ops){ us.add(clamp(o[0], -uLen/2, uLen/2)); us.add(clamp(o[1], -uLen/2, uLen/2)); }
+    const ul = [...us].sort((a, b) => a - b);
+    const c = (f.ax === 'z' ? d : w)/2 - WALL_T/2;   // wall centre-line offset from building centre
+    const toWorld = (u0, u1, v0, v1, t0, t1) => f.ax === 'z'
+      ? [x + u0, v0, z + f.s*c + t0, x + u1, v1, z + f.s*c + t1]
+      : [x + f.s*c + t0, v0, z + u0, x + f.s*c + t1, v1, z + u1];
+    for(let k = 0; k < ul.length - 1; k++){
+      const ua = ul[k], ub = ul[k + 1]; if(ub - ua < 1e-3) continue; const um = (ua + ub)/2;
+      const holes = ops.filter(o => o[0] < um && o[1] > um).map(o => [o[2], o[3]]).sort((a, b) => a[0] - b[0]);
+      let v = 0; for(const [h0, h1] of holes){ if(h0 > v + 1e-3) box(solid, ...toWorld(ua, ub, v, h0, -WALL_T/2, WALL_T/2)); v = Math.max(v, h1); }
+      if(h > v + 1e-3) box(solid, ...toWorld(ua, ub, v, h, -WALL_T/2, WALL_T/2));
+    }
+    // wooden frames round each opening (no collision) and a sill outside
+    for(const [u0, u1, v0, v1] of ops){
+      const fw = 0.07, dp0 = -WALL_T/2 - 0.03, dp1 = WALL_T/2 + 0.03;
+      frames.push(toWorld(u0 - fw, u0, v0, v1, dp0, dp1), toWorld(u1, u1 + fw, v0, v1, dp0, dp1), toWorld(u0 - fw, u1 + fw, v1, v1 + fw, dp0, dp1));
+      if(v0 > 0.1) frames.push(toWorld(u0 - 0.12, u1 + 0.12, v0 - 0.06, v0, f.s > 0 ? -WALL_T/2 : -WALL_T/2 - 0.12, f.s > 0 ? WALL_T/2 + 0.12 : WALL_T/2));
+    }
+    if(f === doorFace){
+      // the door: hinged on one side, swings inward
+      const piv = new THREE.Group(), panel = new THREE.Mesh(new THREE.BoxGeometry(1.28, 2.26, 0.07), doorMat);
+      panel.position.set(0.64, 1.13, 0); panel.castShadow = panel.receiveShadow = true;
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), new THREE.MeshStandardMaterial({color:0xc9a35a, metalness:0.7, roughness:0.35}));
+      knob.position.set(1.12, 1.0, 0.07); panel.add(knob); const knob2 = knob.clone(); knob2.position.z = -0.07; panel.add(knob2);
+      piv.add(panel);
+      const hx = f.ax === 'z' ? x - 0.64 : x + f.s*c, hz = f.ax === 'z' ? z + f.s*c : z - 0.64;
+      piv.position.set(hx, 0.02, hz);
+      piv.rotation.y = f.ax === 'z' ? 0 : -Math.PI/2;
+      scene.add(piv);
+      const nx = f.ax === 'x' ? f.s : 0, nz = f.ax === 'z' ? f.s : 0;
+      const closed = {min:new V3(), max:new V3()}; const col = {min:new V3(), max:new V3()};
+      const ex = toWorld(-0.65, 0.65, 0, 2.3, -0.06, 0.06); closed.min.set(ex[0], ex[1], ex[2]); closed.max.set(ex[3], ex[4], ex[5]);
+      // open: panel swung 90 degrees inward, lying against the hinge side
+      const inX = -nx, inZ = -nz, hingeX = f.ax === 'z' ? x - 0.65 : hx, hingeZ = f.ax === 'z' ? hz : z - 0.65;
+      const o0x = hingeX + inX*0.0, o0z = hingeZ + inZ*0.0, o1x = hingeX + inX*1.28 + (f.ax === 'z' ? 0.08 : 0), o1z = hingeZ + inZ*1.28 + (f.ax === 'x' ? 0.08 : 0);
+      const open = {min:new V3(Math.min(o0x, o1x) - 0.04, 0, Math.min(o0z, o1z) - 0.04), max:new V3(Math.max(o0x, o1x) + 0.04, 2.3, Math.max(o0z, o1z) + 0.04)};
+      col.min.copy(closed.min); col.max.copy(closed.max); colliders.push(col);
+      // which way is "inward" for the rotation sign
+      const baseRot = piv.rotation.y, swing = (f.ax === 'z' ? f.s : -f.s)*Math.PI/2;
+      // the open collider is exactly where the panel ends up
+      piv.rotation.y = baseRot + swing; piv.updateMatrixWorld(true); const pb = new THREE.Box3().setFromObject(panel); piv.rotation.y = baseRot; piv.updateMatrixWorld(true);
+      open.min.copy(pb.min).setY(0); open.max.copy(pb.max);
+      DOORS.push({piv, col, closed, open, baseRot, swing, a:0, open_:false, t:0, x:(ex[0] + ex[3])/2, z:(ex[2] + ex[5])/2, nx, nz});
+    }
+  }
+  // floors with a stairwell, and the stairs
+  const ix0 = x - w/2 + WALL_T, ix1 = x + w/2 - WALL_T, iz0 = z - d/2 + WALL_T, iz1 = z + d/2 - WALL_T;
+  const along = doorFace.ax;                       // stairs run toward the door wall
+  const STEPS = 11, RUN = 0.32, SW = 1.1, rise = FLOOR_H/STEPS;
+  for(let f = 0; f < floors - 1; f++){
+    const side = f % 2 ? -1 : 1, y0 = f*FLOOR_H, y1 = (f + 1)*FLOOR_H;
+    // footprint: against a side wall, starting at the back wall, climbing toward the front
+    const back = -doorFace.s;
+    let rect;
+    for(let k = 0; k < STEPS; k++){
+      const l0 = 0.95 + k*RUN, l1 = l0 + RUN, top = y0 + (k + 1)*rise;   // a landing at the bottom so you can walk straight on
+      if(along === 'z'){ const sx0 = side > 0 ? ix1 - SW : ix0, sx1 = sx0 + SW, zb = back > 0 ? iz1 : iz0, za = zb - back*l0, zc = zb - back*l1;
+        box(trim, sx0, y0, Math.min(za, zc), sx1, top, Math.max(za, zc)); rect = [sx0, Math.min(zb, zb - back*(l1 + 0.6)), sx1, Math.max(zb, zb - back*(l1 + 0.6))]; }
+      else { const sz0 = side > 0 ? iz1 - SW : iz0, sz1 = sz0 + SW, xb = back > 0 ? ix1 : ix0, xa = xb - back*l0, xc = xb - back*l1;
+        box(trim, Math.min(xa, xc), y0, sz0, Math.max(xa, xc), top, sz1); rect = [Math.min(xb, xb - back*(l1 + 0.6)), sz0, Math.max(xb, xb - back*(l1 + 0.6)), sz1]; }
+    }
+    // slab at y1 with a hole over this flight
+    const [hx0, hz0, hx1, hz1] = rect;
+    const parts = [[ix0, iz0, hx0, iz1], [hx1, iz0, ix1, iz1], [hx0, iz0, hx1, hz0], [hx0, hz1, hx1, iz1]];
+    for(const [a0, b0, a1, b1] of parts) if(a1 - a0 > 0.05 && b1 - b0 > 0.05) box(slab, a0, y1 - SLAB, b0, a1, y1, b1);
+    // a rail along the open edge of the stairwell upstairs
+    if(along === 'z') box(frames, side > 0 ? hx0 - 0.06 : hx1, y1, hz0, side > 0 ? hx0 : hx1 + 0.06, y1 + 1.0, hz1);
+    else box(frames, hx0, y1, side > 0 ? hz0 - 0.06 : hz1, hx1, y1 + 1.0, side > 0 ? hz0 : hz1 + 0.06);
+  }
+  const add = (list, material, sc) => { if(!list.length) return; const mesh = new THREE.Mesh(mergeBoxes(list, sc), material); mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh); };
+  add(solid, MATS[m].m, MATS[m].s); add(slab, MATS.concrete.m, MATS.concrete.s); add(trim, MATS.concrete.m, MATS.concrete.s); add(frames, frameMat, 1);
+  // roof slab on top, as before
+  B(x, z, w + 0.3, d + 0.3, 0.45, 'concrete', h);
+  // interior light so the rooms aren't black
+  const lamp = new THREE.PointLight(0xffe2b8, 0.55, Math.max(w, d)*1.1, 2); lamp.position.set(x, Math.min(h - 0.6, 2.6), z); scene.add(lamp);
+}
+function doorTick(dt){
+  for(const D of DOORS){
+    const target = D.open_ ? 1 : 0; if(D.a === target) continue;
+    D.a = target > D.a ? Math.min(1, D.a + dt*2.6) : Math.max(0, D.a - dt*2.6);
+    const e = D.a*D.a*(3 - 2*D.a);
+    D.piv.rotation.y = D.baseRot + D.swing*e;
+  }
+}
+function doorNear(){
+  if(!deployed || !P.alive || P.boat || P.heli || P.jet) return null;
+  const eye = P.pos.clone(); eye.y += P.h*0.9;
+  const fwd = new V3(-Math.sin(P.yaw), 0, -Math.cos(P.yaw));
+  let best = null, bd = 2.6;
+  for(const D of DOORS){
+    const dx = D.x - P.pos.x, dz = D.z - P.pos.z, dd = Math.hypot(dx, dz);
+    if(dd < bd && P.pos.y < 1.2 && (dd < 0.9 || (dx*fwd.x + dz*fwd.z)/dd > 0.35)){ bd = dd; best = D; }
+  }
+  return best;
+}
+function setDoor(D, open, stamp, local){
+  if(!open){
+    // don't slam it shut on somebody
+    const who = [P.pos, ...[...remotes.values()].filter(r => r.alive).map(r => r.cur), ...bots.filter(b => b.alive).map(b => b.pos)];
+    if(who.some(p => p && overlaps(p, 1.8, D.closed))){ if(local) feedNote('Someone is in the doorway'); return false; }
+  }
+  D.open_ = open; D.t = stamp;
+  const src = open ? D.open : D.closed; D.col.min.copy(src.min); D.col.max.copy(src.max);
+  if(AC){ const dist = camera.position.distanceTo(new V3(D.x, 1.2, D.z)); if(dist < 40){ const out = outNode(Math.min(0.8, 6/(dist + 4))); const t = AC.currentTime;
+    noiseBurst(out, t, 'bandpass', open ? 520 : 380, 3, 0.35, 0.28, 0.02); if(!open) noiseBurst(out, t + 0.22, 'lowpass', 260, 0, 0.9, 0.12); } }
+  return true;
+}
+function toggleDoor(){
+  const D = doorNear(); if(!D) return false;
+  if(setDoor(D, !D.open_, Date.now(), true)) netDirty = true;
+  return true;
+}
+let doorPromptOn = '';
+function doorPromptTick(){
+  const D = doorNear(), want = D ? (D.open_ ? 'Close the door' : 'Open the door') : '';
+  if(want !== doorPromptOn){ doorPromptOn = want; $('doorPrompt').hidden = !want; if(want) $('doorPromptT').textContent = want; }
 }
 function crate(x, z, y){ B(x, z, 0.9, 0.9, 0.9, 'crate', y||0); }
 const barrelMat = new THREE.MeshStandardMaterial({color:0x7d3a22, roughness:0.75, metalness:0.35});
@@ -1473,6 +1629,7 @@ function updateRemote(r, pr, first){
   if(!bt && !P.boat && !BOAT.driver && Array.isArray(pr.bp) && pr.bp.length === 4 && num(pr.bp[3],0) > BOAT.stamp){
     const bp = pr.bp.map(v => num(v, 0)); BOAT.x = clamp(bp[0], 50, 300); BOAT.z = clamp(bp[1], -230, 230); BOAT.h = bp[2]; BOAT.stamp = bp[3];
   }
+  if(Array.isArray(pr.dr)) pr.dr.slice(0, DOORS.length).forEach((e, i) => { if(Array.isArray(e) && e.length === 2){ const st = num(e[1], 0); if(st > DOORS[i].t && st < Date.now() + 6e4) setDoor(DOORS[i], !!e[0], st, false); } });
   r.alive = alive; r.k = Math.max(0, num(pr.k,0)|0); r.d = Math.max(0, num(pr.d,0)|0);
   r.updatedAt = t;
 }
@@ -1487,6 +1644,7 @@ function sendPresence(t){
   if(P.heli) payload.hc = [r2(HELI.x), r2(HELI.y), r2(HELI.z), r3(HELI.h)];
   payload.jp = [r2(JET.x), r2(JET.z), r3(JET.h), JET.stamp];
   if(P.jet) payload.jc = [r2(JET.x), r2(JET.z), r3(JET.h)];
+  if(DOORS.some(D => D.t)) payload.dr = DOORS.map(D => D.t ? [D.open_ ? 1 : 0, D.t] : 0);
   if(PROJ.length) payload.pj = PROJ.slice(-6).map(q => [q.id, q.type, r2(q.pos.x), r2(q.pos.y), r2(q.pos.z)]);
   try{ const p = game.send({type:'broadcast', event:'st', payload}); if(p && p.catch) p.catch(()=>{}); }catch(e){}
 }
@@ -2294,7 +2452,7 @@ window.addEventListener('keydown', e => {
   if(e.code === 'Digit5' || e.code === 'Numpad5') switchWeapon(5);
   if(e.code === 'KeyQ') cycleWeapon(1);
   if(e.code === 'KeyT' && ARMS && P.alive && P.weapon === 2 && P.switchT <= 0 && P.reload <= 0 && !firing && P.ads < 0.1 && !ARMS.cur) armsPlay('INSPEC', 0.2);
-  if(e.code === 'KeyE'){ if(!tryBuy() && !toggleHeli() && !toggleJet()) toggleBoat(); return; }
+  if(e.code === 'KeyE'){ if(!tryBuy() && !toggleHeli() && !toggleJet() && !toggleDoor()) toggleBoat(); return; }
   if(e.code === 'Space' && P.grounded && P.alive && !(P.boat || P.heli || P.jet)){ P.vel.y = P.crouch ? 4.5 : 6.2; footstep(0.35); }
   if(e.code === 'KeyC' && !(P.boat || P.heli || P.jet)) P.crouchToggle = !P.crouchToggle;
 });
@@ -3874,6 +4032,7 @@ function frame(){
   bimTick(dt, t);
   heliTick(dt, t);
   jetTick(dt, t);
+  doorTick(dt); doorPromptTick();
   if(deployed) update(dt, t);
   else {
     // Idle flyover behind the menu
