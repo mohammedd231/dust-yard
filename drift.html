@@ -556,7 +556,7 @@ function initAudio(){
   const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 2.5;
   const eng = AC.createGain(); eng.gain.value = 0.0;
   const oscs = [['sawtooth', 1, 0.5], ['square', 2, 0.18], ['sawtooth', 0.5, 0.35], ['triangle', 3, 0.12]].map(([type, mul, g]) => {
-    const o = AC.createOscillator(); o.type = type; const gg = AC.createGain(); gg.gain.value = g; o.connect(gg); gg.connect(shaper); o.start(); return {o, mul}; });
+    const o = AC.createOscillator(); o.type = type; const gg = AC.createGain(); gg.gain.value = g; o.connect(gg); gg.connect(shaper); o.start(); return {o, mul, gg}; });
   shaper.connect(lp); lp.connect(eng); eng.connect(master);
   // intake/exhaust hiss
   const ns = AC.createBufferSource(); ns.buffer = nb; ns.loop = true; const nf = AC.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = 700; nf.Q.value = 0.8; const ng = AC.createGain(); ng.gain.value = 0; ns.connect(nf); nf.connect(ng); ng.connect(master); ns.start();
@@ -564,14 +564,22 @@ function initAudio(){
   const ts = AC.createBufferSource(); ts.buffer = nb; ts.loop = true; const tf = AC.createBiquadFilter(); tf.type = 'bandpass'; tf.frequency.value = 1500; tf.Q.value = 7; const tg = AC.createGain(); tg.gain.value = 0; ts.connect(tf); tf.connect(tg); tg.connect(master); ts.start();
   A = {master, lp, eng, oscs, ng, nf, tg, tf, nb};
 }
+/* Each car has its own engine voice.
+   Supra (2JZ straight-six): 3 bangs per turn, deep and smooth, heavy on the low partials.
+   RX-7 (13B twin rotor): 2 pulses per turn but raspy and high, the upper partials dominate, plus the rotary's 'brap' jitter. */
+const ENGINE_VOICE = {
+  jdm:{ fire:3, osc:[['sawtooth', 1, 0.5], ['sawtooth', 0.5, 0.5], ['triangle', 1.5, 0.18], ['square', 2, 0.06]], lp:[320, 1900, 0.22], jitter:0.004, vol:1.05 },
+  rx7:{ fire:2, osc:[['square', 2, 0.32], ['sawtooth', 3, 0.3], ['square', 4, 0.16], ['sawtooth', 1, 0.14]], lp:[900, 3800, 0.55], jitter:0.03, vol:0.85 } };
 function engineSound(dt){
   if(!A || !C) return;
-  const t = AC.currentTime, rpm = S.rpm, f = rpm/60*2;                       // 4 cylinders: 2 bangs per turn
+  const V = ENGINE_VOICE[carKey] || ENGINE_VOICE.jdm;
+  if(A.voice !== V){ A.voice = V; A.oscs.forEach((O, i) => { const [type, mul, g] = V.osc[i]; O.o.type = type; O.mul = mul; O.gg.gain.value = g; }); }
+  const t = AC.currentTime, rpm = S.rpm, f = rpm/60*V.fire;
   const lim = S.limiter ? (Math.sin(t*60) > 0 ? 1 : 0.4) : 1;
-  for(const O of A.oscs) O.o.frequency.setTargetAtTime(f*O.mul*(1 + (Math.random() - 0.5)*0.004), t, 0.015);
+  for(const O of A.oscs) O.o.frequency.setTargetAtTime(f*O.mul*(1 + (Math.random() - 0.5)*V.jitter), t, 0.015);
   const load = S.thr && S.shiftT <= 0 ? 1 : 0.25;
-  A.lp.frequency.setTargetAtTime(500 + load*2600 + rpm*0.35, t, 0.04);
-  A.eng.gain.setTargetAtTime((S.paused ? 0.12 : 0.22 + load*0.28)*lim, t, 0.03);
+  A.lp.frequency.setTargetAtTime(V.lp[0] + load*V.lp[1] + rpm*V.lp[2], t, 0.04);
+  A.eng.gain.setTargetAtTime((S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol, t, 0.03);
   A.ng.gain.setTargetAtTime(0.02 + load*0.05*rpm/C.redline, t, 0.05); A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
   A.tg.gain.setTargetAtTime(S.kmh > 12 ? clamp(S.slipR - 0.25, 0, 1)*0.5 : 0, t, 0.05); A.tf.frequency.setTargetAtTime(1300 + S.slipR*600, t, 0.08);
   // lift-off pops and crackles from high revs
