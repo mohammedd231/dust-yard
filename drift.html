@@ -646,7 +646,7 @@ function bank(){
 function shift(d){
   const ng = clamp(S.gear + d, 1, C.gears.length); if(ng === S.gear) return;
   const up = ng > S.gear; S.gear = ng; S.shiftT = up ? 0.16 : 0.12;
-  if(up && S.rpm > C.redline*0.7) pop(2 + (Math.random()*2|0), 0.9);        // upshift bang
+  if(up && S.rpm > C.redline*0.7){ pop(2 + (Math.random()*2|0), 0.9); flutter(0.6); }        // upshift bang
   else if(!up) blip();
 }
 let msgT = 0; function msg(t, col){ $('sMsg').textContent = t; $('sMsg').style.color = col || '#fff'; msgT = 2; }
@@ -679,18 +679,25 @@ function initAudio(){
    up or slowed down to the live rpm and they cross-fade, like most racing games. The synth stays
    as the fallback while they load (or if they fail). */
 const SAMPLES = {
-  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 8200]], pops:4, vol:1.25 }
+  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 3600], ['high', 2780, 2600, 5600], ['top', 7100, 4600, 8400]], pops:4, flutter:true, vol:1.25 }
 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
     const get = n => fetch(P.dir + 'supra_' + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
-    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i))]).then(bufs => {
+    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : [])]).then(bufs => {
       const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; lp.connect(out); out.connect(A.master);
       P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3]}; });
-      P.popBufs = bufs.slice(P.loops.length); P.out = out; P.lp = lp; P.ready = true;
+      P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
     }).catch(() => {});
   }
+}
+// turbo flutter ("stututu") when the throttle snaps shut on boost
+function flutter(vol){
+  const P = SAMPLES[carKey]; if(!P || !P.ready || !P.flutterBuf || AC.currentTime - (P.lastFl || 0) < 0.9) return;
+  P.lastFl = AC.currentTime;
+  const s = AC.createBufferSource(); s.buffer = P.flutterBuf; s.playbackRate.value = 0.95 + Math.random()*0.12;
+  const g = AC.createGain(); g.gain.value = vol; s.connect(g); g.connect(A.master); s.start();
 }
 function samplePop(vol){
   const P = SAMPLES[carKey]; if(!P || !P.ready) return false;
@@ -730,7 +737,8 @@ function engineSound(dt){
   A.ng.gain.setTargetAtTime(0.02 + load*0.05*rpm/C.redline, t, 0.05); A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
   A.tg.gain.setTargetAtTime(S.kmh > 12 ? clamp(S.slipR - 0.25, 0, 1)*0.5 : 0, t, 0.05); A.tf.frequency.setTargetAtTime(1300 + S.slipR*600, t, 0.08);
   // lift-off pops and crackles from high revs
-  if(S.prevThr && !S.thr && rpm > C.redline*0.6){ S.crackle = 0.6 + Math.random()*0.8; }
+  if(S.prevThr && !S.thr && rpm > C.redline*0.6){ S.crackle = 0.6 + Math.random()*0.8; flutter(0.8); }
+  if(S.prevThr && !S.thr && rpm > C.redline*0.4) flutter(0.55);
   S.prevThr = S.thr;
   if(S.crackle > 0){ S.crackle -= dt; S.popT -= dt; if(S.popT <= 0){ S.popT = 0.035 + Math.random()*0.14; pop(1, 0.35 + Math.random()*0.5); } }
 }
