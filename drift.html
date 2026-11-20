@@ -65,6 +65,8 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
 .status{color:var(--muted);margin:0;font-size:12px}
 .load{height:3px;background:rgba(235,236,240,.1)} .load i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 @media (max-width:600px){.board{display:none}.score .cur{font-size:40px}}
+/* phones: the speed panel moves to the bottom middle, between the steering and pedal buttons */
+html.touch .dash{right:auto;left:50%;transform:translateX(-50%) scale(.62);transform-origin:bottom center;bottom:calc(10px + env(safe-area-inset-bottom,0px))}
 </style>
 </head>
 <body>
@@ -105,6 +107,7 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="touch-controls.js"></script>
 <script>
 (() => {
 'use strict';
@@ -962,6 +965,17 @@ function frame(){
 }
 camera.position.set(200, 120, 200); camera.lookAt(230, 0, -80);
 frame();
+
+/* ---------- phone / tablet controls ---------- */
+if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ buttons:[
+  { label:'◀', x:'l0', y:'b0', size:'lg', wide:true, code:'KeyA' },
+  { label:'▶', x:'l1.55', y:'b0', size:'lg', wide:true, code:'KeyD' },
+  { label:'Gas', x:'r0', y:'b0', size:'lg', wide:true, code:'KeyW' },
+  { label:'Brake', x:'r1.55', y:'b0', size:'lg', wide:true, code:'KeyS' },
+  { label:'II', x:'r0', y:'t0', size:'sm', code:'Escape' },
+  { label:'Hand brake', x:'r0.1', y:'b2', code:'Space', buzz:true },
+  { label:'Reset', x:'l0', y:'t0', size:'sm', code:'KeyR' }
+] });
 })();
 </script>
 </body>

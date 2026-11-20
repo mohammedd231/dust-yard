@@ -177,6 +177,11 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
   .health{width:160px}.ammo{min-width:140px}.mag{font-size:40px}
   .menu{background:rgba(13,14,11,.9)}
 }
+/* phones: health, coins and ammo move up out of the way of the stick and buttons */
+html.touch .health{bottom:auto;top:calc(54px + env(safe-area-inset-top,0px));transform:scale(.62);transform-origin:top left}
+html.touch .coins{bottom:auto;top:calc(102px + env(safe-area-inset-top,0px));transform:scale(.75);transform-origin:top left}
+html.touch .ammo{right:auto;left:50%;bottom:auto;top:calc(58px + env(safe-area-inset-top,0px));transform:translateX(-50%) scale(.55);transform-origin:top center}
+html.touch .slots,html.touch .wslots{display:none}
 </style>
 </head>
 <body>
@@ -265,13 +270,14 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
       <dt>Esc</dt><dd>Pause, copy the invite link or leave</dd>
     </dl>
     <p class="credit">AK-74U arms and animations by BURNER (Sketchfab), CC BY 4.0. Knife model by Pichuliru.</p>
-    <p class="note" id="touchNote" hidden>Dust Yard needs a keyboard and mouse. Open it on a computer to play.</p>
+    <p class="note" id="touchNote" hidden>On a phone: turn it sideways. Left stick moves (push all the way to sprint), drag on the right to look, buttons for the rest.</p>
   </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="touch-controls.js"></script>
 <script>
 (function(){
 'use strict';
@@ -2343,7 +2349,7 @@ function updateHUD(dt, t){
 }
 
 /* ---------------- Menu, matchmaking & input ---------------- */
-const isTouch = matchMedia('(hover: none) and (pointer: coarse)').matches;
+const isTouch = !!(window.TOUCH && TOUCH.isTouch);
 $('touchNote').hidden = !isTouch;
 $('nick').value = myName;
 $('sens').value = sens; $('sensVal').textContent = sens.toFixed(2);
@@ -2433,6 +2439,7 @@ function onLockError(){
   else if(deployed){ pause(); $('copyStatus').hidden = false; $('copyStatus').textContent = 'The browser needs a moment before it gives the mouse back to the game. Click Resume again.'; }
 }
 function requestLock(){
+  if(isTouch){ lockFailed = true; return; }   // phones have no mouse to lock: touch controls drive the look
   if(lockFailed) return;
   try{
     // raw mouse input where the browser supports it: no OS acceleration, none of the jumps it causes
@@ -2494,6 +2501,23 @@ window.addEventListener('mousemove', e => {
   mouseDX += dx; mouseDY += dy;
 });
 let lastMoveMag = 0, lastMoveT = 0;
+// on-screen controls for phones and tablets
+if(isTouch && window.TOUCH) TOUCH.init({
+  stick:{ up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', sprint:'ShiftLeft' },
+  look:(dx, dy) => { if(deployed && !paused){ mouseDX += dx*1.5; mouseDY += dy*1.5; } },
+  buttons:[
+    { label:'Fire', x:'r0.3', y:'b1.35', size:'lg', look:true, down:() => { firing = true; initAudio(); }, up:() => { firing = false; } },
+    { label:'Jump', x:'r0', y:'b0', code:'Space' },
+    { label:'Crouch', x:'r1', y:'b0', code:'KeyC' },
+    { label:'Aim', x:'r1.55', y:'b1.1', down:() => { adsHeld = !adsHeld; } },
+    { label:'Reload', x:'r0.1', y:'b2.75', size:'sm', code:'KeyR' },
+    { label:'Swap', x:'r0.85', y:'b2.6', size:'sm', code:'KeyQ' },
+    { label:'Knife', x:'r2', y:'b0', size:'sm', code:'KeyV' },
+    { label:'Use', x:'r2.4', y:'b0.95', size:'sm', code:'KeyE' },
+    { label:'II', x:'r0', y:'t0', size:'sm', code:'Escape' },
+    { label:'Score', x:'r0.8', y:'t0', size:'sm', code:'Tab' }
+  ]
+});
 window.addEventListener('keydown', e => {
   if(e.code === 'Tab' && deployed && !paused){ e.preventDefault(); $('board').hidden = false; hudTimer = 0; return; }
   if(!deployed || paused) return;
