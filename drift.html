@@ -420,11 +420,15 @@ function step(dt){
   const px = S.x, pz = S.z;
   while(rem > 1e-6){
     const h = Math.min(rem, 1/240); rem -= h;
-    const ax = (Fxr + Fxf*cd - Fyf*sd - drag)/m;
+    // at walking pace the steered tyre can't shove the car backwards
+    const kin = clamp((sp - 1.5)/3, 0, 1);
+    const ax = (Fxr + Fxf*cd - (vx < 0 ? -Math.abs(Fyf*sd) : Fyf*sd)*kin - drag)/m;
     const ay = (Fyr + Fyf*cd + Fxf*sd)/m;
     const rd = (a*(Fyf*cd + Fxf*sd) - b*Fyr)/Iz;
-    vx += (ax + vy*r)*h;
-    const kin = clamp((sp - 1.5)/3, 0, 1);
+    const vx0 = vx;
+    vx += (ax + vy*r*kin)*h;
+    // the car only rolls backwards when you're actually reversing
+    if(!reverse && vx0 >= 0 && vx < 0) vx = 0;
     vy += (ay - vx*r)*h*kin; r += rd*h*kin;
     if(kin < 1){ r = lerp(vx/Lw*Math.tan(S.steer), r, kin); vy *= Math.exp(-h*8*(1 - kin)); }
     if(sp < 0.3 && !thr && !reverse) vx *= Math.exp(-h*3);
