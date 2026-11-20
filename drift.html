@@ -682,15 +682,15 @@ function initAudio(){
    up or slowed down to the live rpm and they cross-fade, like most racing games. The synth stays
    as the fallback while they load (or if they fail). */
 const SAMPLES = {
-  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 8050, 300], ['top', 7100, 7700, 9000, 300]], pops:4, flutter:true, vol:1.25 }
+  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8]]   // at the limiter the anti-lag rides on top of the same engine, not instead of it, pops:4, flutter:true, vol:1.25 }
 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
     const get = n => fetch(P.dir + 'supra_' + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
     Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : [])]).then(bufs => {
-      const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; lp.connect(out); out.connect(A.master);
-      P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4]}; });
+      const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; const comp = AC.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; lp.connect(comp); comp.connect(out); out.connect(A.master);
+      P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4], vol:l[5] || 1}; });
       P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
     }).catch(() => {});
   }
@@ -731,7 +731,7 @@ function engineSound(dt){
       L.s.playbackRate.setTargetAtTime(clamp(rpm/L.base, 0.5, 3.2), t, 0.02);
       const fade = L.fade || (L.hi - L.lo)*0.3, a = i === 0 ? 1 : (rpm - L.lo)/fade, b = i === P.layers.length - 1 ? 1 : (L.hi - rpm)/fade;
       const w = Math.sin(Math.PI/2*clamp(Math.min(a, b, 1), 0, 1));
-      L.g.gain.setTargetAtTime(w, t, 0.03);
+      L.g.gain.setTargetAtTime(w*L.vol, t, 0.03);
     });
     P.lp.frequency.setTargetAtTime(load > 0.5 ? 9000 : 1800 + rpm*0.25, t, 0.05);
     P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol, t, 0.03);
