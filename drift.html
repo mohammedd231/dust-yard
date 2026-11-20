@@ -679,7 +679,7 @@ function initAudio(){
    up or slowed down to the live rpm and they cross-fade, like most racing games. The synth stays
    as the fallback while they load (or if they fail). */
 const SAMPLES = {
-  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 3600], ['high', 2780, 2600, 5600], ['top', 7100, 4600, 8400]], pops:4, flutter:true, vol:1.25 }
+  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 8050, 300], ['top', 7100, 7700, 9000, 300]], pops:4, flutter:true, vol:1.25 }
 };
 function loadSamples(){
   for(const key in SAMPLES){
@@ -687,7 +687,7 @@ function loadSamples(){
     const get = n => fetch(P.dir + 'supra_' + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
     Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : [])]).then(bufs => {
       const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; lp.connect(out); out.connect(A.master);
-      P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3]}; });
+      P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4]}; });
       P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
     }).catch(() => {});
   }
@@ -726,7 +726,7 @@ function engineSound(dt){
     // pick the two nearest recordings, pitch each to the live revs, equal-power blend between them
     P.layers.forEach((L, i) => {
       L.s.playbackRate.setTargetAtTime(clamp(rpm/L.base, 0.5, 3.2), t, 0.02);
-      const fade = (L.hi - L.lo)*0.3, a = i === 0 ? 1 : (rpm - L.lo)/fade, b = i === P.layers.length - 1 ? 1 : (L.hi - rpm)/fade;
+      const fade = L.fade || (L.hi - L.lo)*0.3, a = i === 0 ? 1 : (rpm - L.lo)/fade, b = i === P.layers.length - 1 ? 1 : (L.hi - rpm)/fade;
       const w = Math.sin(Math.PI/2*clamp(Math.min(a, b, 1), 0, 1));
       L.g.gain.setTargetAtTime(w, t, 0.03);
     });
