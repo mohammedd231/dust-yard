@@ -516,7 +516,7 @@ function step(dt){
   const wheelRpm = (sideways ? vmag : Math.abs(vx))/wr*60/(2*Math.PI);   // sliding, the driven wheels keep turning
   let rpm = Math.max(900, wheelRpm*R[S.gear - 1]*C.final);
   if(!S.manual && S.shiftT <= 0 && vx > 0.5){
-    if(rpm > C.redline*0.94 && S.gear < R.length && thr) shift(1);
+    if(rpm > C.redline*0.94 && S.gear < R.length && thr && !S.driftMode && !sideways) shift(1);   // hold the gear while sliding
     else if(rpm < C.redline*0.42 && S.gear > 1 && !sideways) shift(-1);
   }
   rpm = Math.max(900, wheelRpm*R[S.gear - 1]*C.final);
@@ -524,12 +524,15 @@ function step(dt){
   // drive force at the wheels (cut while the clutch is in during a shift)
   const onPower = thr && S.shiftT <= 0;
   let drive = 0;
-  if(onPower && rpm < C.redline){ const P = C.power*torqueAt(rpm); drive = Math.min(P/Math.max(sp, 3), C.mass*9.81*1.2); }
+  const sliding = S.driftMode || sideways;
+  if(onPower && (rpm < C.redline || sliding)){ const P = C.power*torqueAt(Math.min(rpm, C.redline*0.97)); drive = Math.min(P/Math.max(sp, 3), C.mass*9.81*1.2); }   // sliding on the limiter keeps its power
   const wantDrive = drive;
-  if(onPower && rpm >= C.redline){ drive = 0; S.limiter = true; } else S.limiter = false;
+  if(onPower && rpm >= C.redline && !sliding){ drive = 0; S.limiter = true; } else S.limiter = false;
   if(reverse){ drive = vx > -7 ? -C.mass*4 : 0; }
   // free revs: with the wheels sliding the engine spins up
-  S.rpm = lerp(S.rpm, onPower ? Math.max(rpm, rpm + (S.slipR > 0.3 ? 1800*S.slipR : 0)) : rpm, 1 - Math.exp(-dt*12));
+  // on the gas in a slide the revs climb to the limiter and sit there (anti-lag) until the car straightens up
+  const revT = onPower && sliding && sp > 4 ? C.redline + 100 : onPower ? Math.max(rpm, rpm + (S.slipR > 0.3 ? 1800*S.slipR : 0)) : rpm;
+  S.rpm = lerp(S.rpm, revT, 1 - Math.exp(-dt*(revT > rpm + 500 ? 4 : 12)));
   S.rpm = clamp(S.rpm, 850, C.redline + 150);
   // loads and tyre forces
   const m = C.mass, Lw = C.wheelbase || 2.5, a = Lw*0.48, b = Lw*0.52, Iz = m*1.45;
