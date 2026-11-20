@@ -673,6 +673,29 @@ function initAudio(){
   // tyre squeal
   const ts = AC.createBufferSource(); ts.buffer = nb; ts.loop = true; const tf = AC.createBiquadFilter(); tf.type = 'bandpass'; tf.frequency.value = 1500; tf.Q.value = 7; const tg = AC.createGain(); tg.gain.value = 0; ts.connect(tf); tf.connect(tg); tg.connect(master); ts.start();
   A = {master, lp, eng, oscs, ng, nf, tg, tf, nb};
+  loadSamples();
+}
+/* Recorded engines. A car with recordings plays looped clips at a few known revs; each layer is sped
+   up or slowed down to the live rpm and they cross-fade, like most racing games. The synth stays
+   as the fallback while they load (or if they fail). */
+const SAMPLES = {
+  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 8200]], pops:4, vol:1.25 }
+};
+function loadSamples(){
+  for(const key in SAMPLES){
+    const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
+    const get = n => fetch(P.dir + 'supra_' + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
+    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i))]).then(bufs => {
+      const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; lp.connect(out); out.connect(A.master);
+      P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3]}; });
+      P.popBufs = bufs.slice(P.loops.length); P.out = out; P.lp = lp; P.ready = true;
+    }).catch(() => {});
+  }
+}
+function samplePop(vol){
+  const P = SAMPLES[carKey]; if(!P || !P.ready) return false;
+  const s = AC.createBufferSource(); s.buffer = P.popBufs[Math.random()*P.popBufs.length|0]; s.playbackRate.value = 0.9 + Math.random()*0.25;
+  const g = AC.createGain(); g.gain.value = 0.9*vol; s.connect(g); g.connect(A.master); s.start(); return true;
 }
 /* Each car has its own engine voice.
    Supra (2JZ straight-six): 3 bangs per turn, deep and smooth, heavy on the low partials.
@@ -690,7 +713,20 @@ function engineSound(dt){
   for(const O of A.oscs) O.o.frequency.setTargetAtTime(f*O.mul*(1 + (Math.random() - 0.5)*V.jitter), t, 0.015);
   const load = S.thr && S.shiftT <= 0 ? 1 : 0.25;
   A.lp.frequency.setTargetAtTime(V.lp[0] + load*V.lp[1] + rpm*V.lp[2], t, 0.04);
-  A.eng.gain.setTargetAtTime((S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol, t, 0.03);
+  const P = SAMPLES[carKey], rec = P && P.ready;
+  for(const k in SAMPLES){ const Q = SAMPLES[k]; if(Q.ready && Q !== P) Q.out.gain.setTargetAtTime(0, t, 0.05); }
+  if(rec){
+    // pick the two nearest recordings, pitch each to the live revs, equal-power blend between them
+    P.layers.forEach((L, i) => {
+      L.s.playbackRate.setTargetAtTime(clamp(rpm/L.base, 0.5, 3.2), t, 0.02);
+      const fade = (L.hi - L.lo)*0.3, a = i === 0 ? 1 : (rpm - L.lo)/fade, b = i === P.layers.length - 1 ? 1 : (L.hi - rpm)/fade;
+      const w = Math.sin(Math.PI/2*clamp(Math.min(a, b, 1), 0, 1));
+      L.g.gain.setTargetAtTime(w, t, 0.03);
+    });
+    P.lp.frequency.setTargetAtTime(load > 0.5 ? 9000 : 1800 + rpm*0.25, t, 0.05);
+    P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol, t, 0.03);
+  }
+  A.eng.gain.setTargetAtTime(rec ? 0 : (S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol, t, 0.03);
   A.ng.gain.setTargetAtTime(0.02 + load*0.05*rpm/C.redline, t, 0.05); A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
   A.tg.gain.setTargetAtTime(S.kmh > 12 ? clamp(S.slipR - 0.25, 0, 1)*0.5 : 0, t, 0.05); A.tf.frequency.setTargetAtTime(1300 + S.slipR*600, t, 0.08);
   // lift-off pops and crackles from high revs
@@ -701,6 +737,7 @@ function engineSound(dt){
 function pop(n, vol){
   if(!A) return;
   const t0 = AC.currentTime;
+  if(samplePop(vol)){ for(let k = 1; k < n; k++) setTimeout(() => samplePop(vol*0.8), k*(40 + Math.random()*60)); flame(0.12 + 0.06*n); return; }
   for(let k = 0; k < n; k++){
     const t = t0 + k*(0.03 + Math.random()*0.05);
     // the crack: a very short, bright noise burst
