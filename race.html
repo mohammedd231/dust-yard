@@ -204,7 +204,7 @@ const body = new THREE.Group(); car.add(body);
 const shadowBlob = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 5.8), new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.45, depthWrite:false}));
 shadowBlob.rotation.x = -Math.PI/2; shadowBlob.renderOrder = 1;
 const CAMS = [
-  {name:'Cockpit', pos:new V3(0, 0.78, 0.74), look:new V3(0, 0.68, 30), fov:72},
+  {name:'Cockpit', pos:new V3(0, 0.86, -0.12), look:new V3(0, 0.62, 30), fov:72},   // driver's eyes, behind the wheel
   {name:'T-cam',   pos:new V3(0, 1.28, -0.35), look:new V3(0, 0.6, 22), fov:68},
   {name:'Chase',   pos:new V3(0, 2.4, -7.6),   look:new V3(0, 0.9, 6),   fov:64}
 ];
@@ -303,7 +303,9 @@ loader.load('models/f1/car.glb', g => {
   wheelR = 11.4 * s;
   // the model's nose points to -Z; turn it around so the nose leads (+Z)
   const wrap = new THREE.Group(); wrap.rotation.y = Math.PI; wrap.add(m);
-  body.add(wrap); progress();
+  body.add(wrap);
+  try { setupWheel(); } catch(e){ console.warn('wheel', e); }
+  progress();
 }, undefined, () => fail('car'));
 
 /* ---------- state ---------- */
@@ -622,6 +624,95 @@ function updateCar(dt){
   sky.position.copy(camera.position);
 }
 
+/* ---------- steering wheel (cockpit view) ----------
+   The car model has its own F1 wheel. Bring it to life: it turns with your steering,
+   gets carbon and rubber instead of plain white, its screen shows gear, speed and lap,
+   and 15 shift lights across the top fill green, red, then blue with the revs, all
+   flashing blue at the limiter. */
+const SW = { root:null, g:null, LEDS:[], sc:null, sx:null, stex:null, t:0, blink:0, dir:-1 };
+function setupWheel(){
+  body.updateMatrixWorld(true);
+  const parts = {}; body.traverse(o => { if(o.isMesh && o.parent && /^Object_(27|29|30|32|33)$/.test(o.parent.name)) (parts[o.parent.name] = parts[o.parent.name] || []).push(o); });
+  const face = parts.Object_30 && parts.Object_30[0]; if(!face) return;
+  const inv = new THREE.Matrix4().copy(body.matrixWorld).invert();
+  // wheel face in body space: centre and plane (PCA: the least-spread direction is the normal)
+  const pa = face.geometry.attributes.position, pts = [], v = new V3(), toBody = new THREE.Matrix4().multiplyMatrices(inv, face.matrixWorld);
+  const norm = !pa.normalized ? 1 : pa.array instanceof Int16Array ? 1/32767 : pa.array instanceof Uint16Array ? 1/65535 : pa.array instanceof Int8Array ? 1/127 : pa.array instanceof Uint8Array ? 1/255 : 1;
+  for(let i = 0; i < pa.count; i++){ v.set(pa.getX(i)*norm, pa.getY(i)*norm, pa.getZ(i)*norm).applyMatrix4(toBody); pts.push(v.clone()); }
+  const c = pts.reduce((a, p) => a.add(p), new V3()).divideScalar(pts.length);
+  const C = [[0,0,0],[0,0,0],[0,0,0]];
+  for(const p of pts){ const d = [p.x - c.x, p.y - c.y, p.z - c.z]; for(let i = 0; i < 3; i++) for(let j = 0; j < 3; j++) C[i][j] += d[i]*d[j]; }
+  // smallest eigenvector by inverse power iteration on (C + eps I)
+  const M = new THREE.Matrix3().set(C[0][0] + 1e-6, C[0][1], C[0][2], C[1][0], C[1][1] + 1e-6, C[1][2], C[2][0], C[2][1], C[2][2] + 1e-6), Mi = new THREE.Matrix3().copy(M).invert();
+  let n = new V3(0.1, 0.3, -1).normalize(); for(let k = 0; k < 30; k++) n.applyMatrix3(Mi).normalize();
+  if(n.z > 0) n.negate();                                                  // face toward the driver (behind, -Z)
+  const up = new V3(0, 1, 0).sub(n.clone().multiplyScalar(n.y)).normalize(), right = new V3().crossVectors(up, n).normalize();
+  // pivot on the wheel's centre, axis along the steering column
+  const root = new THREE.Group(); root.position.copy(c);
+  root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n.clone().negate()));
+  body.add(root); root.updateMatrixWorld(true);
+  const g = new THREE.Group(); root.add(g); g.updateMatrixWorld(true);
+  for(const k in parts) for(const m of parts[k]) g.attach(m);
+  // materials: carbon body, rubber grips, light grey details
+  const cc = document.createElement('canvas'); cc.width = cc.height = 64; const cx = cc.getContext('2d');
+  for(let y = 0; y < 64; y += 8) for(let x = 0; x < 64; x += 8){ const on = ((x + y)/8) % 2; cx.fillStyle = on ? '#25272b' : '#1a1b1e'; cx.fillRect(x, y, 8, 8); cx.fillStyle = 'rgba(255,255,255,.06)'; cx.fillRect(x + (on ? 1 : 0), y + 1, on ? 6 : 1, on ? 1 : 6); }
+  const ct = new THREE.CanvasTexture(cc); ct.wrapS = ct.wrapT = THREE.RepeatWrapping; ct.repeat.set(8, 8);
+  const carbon = new THREE.MeshStandardMaterial({map:ct, color:0x6a6c70, roughness:0.32, metalness:0.3});
+  const rubber = new THREE.MeshStandardMaterial({color:0x202022, roughness:0.95});
+  const detail = new THREE.MeshStandardMaterial({color:0x9aa0a8, roughness:0.5, metalness:0.5});
+  const accent = new THREE.MeshStandardMaterial({color:0xd8dadf, roughness:0.45});
+  const mats = {Object_30:carbon, Object_27:rubber, Object_29:detail, Object_32:detail, Object_33:accent};
+  for(const k in parts) for(const m of parts[k]){ m.material = mats[k]; m.castShadow = false; }
+  // screen over the wheel's display, and the shift lights above it (wheel-local: x right, y up, -z toward driver)
+  const sc = document.createElement('canvas'); sc.width = 320; sc.height = 200; const sx = sc.getContext('2d');
+  const stex = new THREE.CanvasTexture(sc);
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.084, 0.053), new THREE.MeshBasicMaterial({map:stex, toneMapped:false}));
+  scr.position.set(0, 0.012, -0.012); scr.rotation.y = Math.PI; g.add(scr);
+  const LEDS = [], lg = new THREE.SphereGeometry(0.0034, 10, 8), COL = i => i < 5 ? 0x22e05a : i < 10 ? 0xff2a1a : 0x2a6bff;
+  for(let i = 0; i < 15; i++){ const m = new THREE.MeshBasicMaterial({color:COL(i), toneMapped:false}); const L = new THREE.Mesh(lg, m); L.position.set(0.049 - i*0.007, 0.046, -0.012); L.scale.z = 0.5; g.add(L); LEDS.push({m, c:new THREE.Color(COL(i))}); }
+  Object.assign(SW, {root, g, LEDS, sc, sx, stex});
+  root.visible = true;
+}
+function drawWheelScreen(){
+  const g = SW.sx, W = 320, H = 200;
+  g.fillStyle = '#05070a'; g.fillRect(0, 0, W, H);
+  // top strip: lap and delta
+  const lapT = S.lap && S.running ? now() - S.lapStart : 0;
+  g.fillStyle = '#0f141b'; g.fillRect(0, 0, W, 34);
+  g.font = '700 22px "JetBrains Mono", monospace'; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#9aa4b0';
+  g.fillText(S.lap ? 'L' + S.lap : 'OUT', 10, 18);
+  g.textAlign = 'right'; g.fillStyle = '#eef1f5'; g.fillText(S.lap ? fmt(lapT) : '--:--.---', W - 10, 18);
+  // gear, big
+  g.textAlign = 'center'; g.font = '800 104px "Saira Condensed", "Arial Narrow", sans-serif';
+  const lim = (S.rpm || 0) > 11600;
+  g.fillStyle = lim ? (SW.blink > 0.5 ? '#2a6bff' : '#eef1f5') : '#eef1f5'; g.fillText(S.gearTxt || 'N', W/2, 108);
+  // speed and best
+  g.font = '700 30px "JetBrains Mono", monospace'; g.fillStyle = '#eef1f5'; g.textAlign = 'left'; g.fillText(String(S.kmh || 0), 14, 82);
+  g.font = '600 14px "JetBrains Mono", monospace'; g.fillStyle = '#7d8794'; g.fillText('KM/H', 16, 108);
+  g.textAlign = 'right'; g.font = '600 14px "JetBrains Mono", monospace'; g.fillText('BEST', W - 14, 64);
+  g.font = '700 20px "JetBrains Mono", monospace'; g.fillStyle = '#c87cff'; g.fillText(isFinite(S.best) ? fmt(S.best) : '--', W - 12, 88);
+  // bottom: tyre temps and ERS / brake bars
+  const bar = (x, y, w, f, col, label) => { g.fillStyle = '#18202a'; g.fillRect(x, y, w, 12); g.fillStyle = col; g.fillRect(x, y, w*clamp(f, 0, 1), 12); g.fillStyle = '#7d8794'; g.font = '600 12px "JetBrains Mono", monospace'; g.textAlign = 'left'; g.fillText(label, x, y - 9); };
+  bar(12, 152, 130, S.throttle ? 1 : 0.05, '#22e05a', 'THR');
+  bar(178, 152, 130, S.brake ? 1 : 0.0, '#ff2a1a', 'BRK');
+  g.fillStyle = '#7d8794'; g.font = '600 12px "JetBrains Mono", monospace'; g.textAlign = 'center';
+  g.fillText('ERS ' + Math.round(70 + 25*Math.sin(now()*0.07)) + '%   BB 56.5', W/2, 180);
+  SW.stex.needsUpdate = true;
+}
+function wheelTick(dt){
+  if(!SW.g) return;
+  // F1 lock is about +-110 degrees of wheel for the full front-wheel angle
+  SW.g.rotation.z = clamp(S.steer*4.8, -1.9, 1.9)*SW.dir;
+  const f = clamp(((S.rpm || 0) - 7600)/4100, 0, 1), lit = Math.round(f*15);
+  SW.blink = (SW.blink + dt*9) % 1;
+  const limiter = (S.rpm || 0) > 11600;
+  SW.LEDS.forEach((L, i) => {
+    if(limiter){ L.m.color.set(SW.blink > 0.5 ? 0x2a6bff : 0x05070a); }
+    else L.m.color.copy(L.c).multiplyScalar(i < lit ? 1 : 0.08);
+  });
+  SW.t -= dt; if(SW.t <= 0 && camMode === 0){ SW.t = 1/20; drawWheelScreen(); }
+}
+
 /* ---------- camera ---------- */
 const camPos = new V3(), camLook = new V3();
 function positionCamera(dt, snap){
@@ -667,6 +758,8 @@ function updateHUD(dt){
   const lo = GEARS[g-1], hi = GEARS[g], frac = clamp((vf - lo*0.55)/(hi - lo*0.55), 0, 1);
   const rpm = vf < 0 ? 5000 : 4200 + frac*7800 + (S.throttle && vf < 3 ? 3000 : 0);
   engineSound(rpm, S.throttle, speed);
+  S.rpm = rpm; S.gearTxt = vf < -0.5 ? 'R' : (speed < 0.5 && !S.throttle) ? 'N' : String(g); S.kmh = Math.round(speed*3.6);
+  wheelTick(dt);
   hudT -= dt; if(hudT > 0) return; hudT = 0.05;
   $('spd').textContent = kmh;
   $('gear').textContent = vf < -0.5 ? 'R' : (speed < 0.5 && !S.throttle) ? 'N' : g;
