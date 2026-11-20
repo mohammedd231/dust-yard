@@ -386,7 +386,13 @@ function step(dt){
   const Fzf = Math.max(500, Fz*b/Lw - dW), Fzr = Math.max(500, Fz*a/Lw + dW);
   const mu = 1.05, vxs = Math.max(sp, 1.5), sgn = vx >= 0 ? 1 : -1;
   const af = S.steer - Math.atan2(vy + a*r, vxs)*sgn, ar = -Math.atan2(vy - b*r, vxs)*sgn;
-  const tyre = (al, D, B) => D*Math.sin(1.5*Math.atan(B*al));
+  // drift mode starts only when you pull the handbrake, and ends once the car is straight again
+  const slideAng = sp > 2 ? Math.abs(Math.atan2(vy, Math.abs(vx))) : 0;
+  if(hb && sp > 4) S.driftMode = true;
+  if(S.driftMode && !hb){ S.straightT = slideAng < 0.1 ? (S.straightT || 0) + dt : 0; if(S.straightT > 0.35) S.driftMode = false; }
+  // grip driving: tyres hold on past their peak; in a drift they let go like real tyres
+  const fall = S.driftMode ? 1.5 : 1.15;
+  const tyre = (al, D, B) => D*Math.sin(fall*Math.atan(B*al));
   let Df = mu*Fzf, Dr = mu*Fzr;
   // brakes
   let Fbf = 0, Fbr = 0;
@@ -395,8 +401,8 @@ function step(dt){
   // drive on the rear (rwd) or front (fwd)
   let Fxf = -Fbf*sgn, Fxr = -Fbr*sgn;
   // pointing straight, the rears hook up (a driver feeds the throttle in); turned in, all the power can break them loose
-  const turnIn = Math.min(1, Math.abs(S.steer)/0.12 + (Math.abs(vy) > 1.5 ? 1 : 0));
-  if(C.drive === 'rwd') drive = Math.min(drive, Dr*(0.97 + 0.6*turnIn)); else drive = Math.min(drive, Df*0.97);
+  // traction control while grip driving; once drifting, the throttle can spin the rears to hold the slide
+  if(C.drive === 'rwd') drive = Math.min(drive, Dr*(S.driftMode ? 1.55 : 0.9)); else drive = Math.min(drive, Df*0.97);
   if(C.drive === 'rwd') Fxr += drive; else Fxf += drive;
   const ell = (Fx, D) => Math.sqrt(Math.max(0, 1 - Math.min(1, (Fx/D)*(Fx/D))));
   // handbrake: locked rears give up nearly all side grip; wheelspin does the same on a rwd car
@@ -424,6 +430,12 @@ function step(dt){
     if(sp < 0.3 && !thr && !reverse) vx *= Math.exp(-h*3);
     // a little help holding long drifts on a keyboard: yaw doesn't run away
     r *= Math.exp(-h*0.35);
+    if(!S.driftMode && sp > 4){
+      // stability: without the handbrake the car follows its nose instead of stepping out
+      const beta = Math.atan2(vy, sp);
+      if(Math.abs(beta) > 0.04) vy -= (Math.abs(beta) - 0.04)*Math.sign(beta)*sp*Math.min(1, h*6);
+      const rLim = 1.05*mu*9.81/sp; if(Math.abs(r) > rLim) r -= (Math.abs(r) - rLim)*Math.sign(r)*Math.min(1, h*8);
+    }
     S.ax = lerp(S.ax, ax, 1 - Math.exp(-h*8)); S.ay = ay;
     S.h += r*h;
     const nfx = Math.sin(S.h), nfz = Math.cos(S.h), nyx = Math.cos(S.h), nyz = -Math.sin(S.h);
