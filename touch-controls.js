@@ -21,15 +21,16 @@
   .tc[hidden]{display:none}
   .tc .look{position:absolute;top:0;bottom:0;right:0;width:55%;pointer-events:auto;touch-action:none}
   .tc .b{position:absolute;pointer-events:auto;touch-action:none;display:grid;place-items:center;width:var(--s);height:var(--s);border-radius:50%;
-    background:rgba(20,22,26,.42);border:2px solid rgba(255,255,255,.35);color:#fff;font:700 12px/1.1 system-ui,-apple-system,sans-serif;letter-spacing:.04em;text-transform:uppercase;text-align:center;
-    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);box-shadow:0 2px 10px rgba(0,0,0,.35)}
-  .tc .b.on{background:rgba(255,120,40,.55);border-color:rgba(255,190,140,.9)}
+    background:rgba(20,22,26,.22);border:1.5px solid rgba(255,255,255,.3);color:rgba(255,255,255,.85);font:700 11px/1.1 system-ui,-apple-system,sans-serif;letter-spacing:.04em;text-transform:uppercase;text-align:center}
+  .tc .b.on{background:rgba(255,120,40,.45);border-color:rgba(255,190,140,.9)}
   .tc .b.wide{border-radius:18px;width:calc(var(--s)*1.15);height:calc(var(--s)*1.5)}
   .tc .stick{position:absolute;left:calc(env(safe-area-inset-left,0px) + 18px);bottom:calc(env(safe-area-inset-bottom,0px) + 18px);width:150px;height:150px;border-radius:50%;
     background:rgba(20,22,26,.3);border:2px solid rgba(255,255,255,.25);pointer-events:auto;touch-action:none}
   .tc .knob{position:absolute;left:50%;top:50%;width:62px;height:62px;margin:-31px 0 0 -31px;border-radius:50%;background:rgba(255,255,255,.55)}
   .tc .rot{position:fixed;inset:0;display:none;place-items:center;background:rgba(8,9,11,.92);color:#fff;font:600 16px system-ui,sans-serif;text-align:center;padding:30px;pointer-events:auto}
   @media (orientation:portrait){ .tc .rot{display:grid} }
+  .tc .fsh{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 54px);transform:translateX(-50%);max-width:80%;padding:8px 14px;border-radius:10px;
+    background:rgba(8,9,11,.75);color:#fff;font:600 12px/1.35 system-ui,sans-serif;text-align:center;pointer-events:auto}
   `;
 
   function init(cfg){
@@ -69,7 +70,7 @@
     const btns = [];
     for(const B of cfg.buttons || []){
       const el = document.createElement('div'); el.className = 'b' + (B.wide ? ' wide' : ''); el.textContent = B.label;
-      const s = B.size === 'lg' ? 92 : B.size === 'sm' ? 50 : 70; el.style.setProperty('--s', s + 'px');
+      const s = B.size === 'lg' ? 92 : B.size === 'md' ? 58 : B.size === 'sm' ? 44 : 64; el.style.setProperty('--s', s + 'px');
       const col = +B.x.slice(1), row = +B.y.slice(1), gap = 12, unit = 78;
       const hx = `calc(env(safe-area-inset-${B.x[0] === 'l' ? 'left' : 'right'},0px) + ${18 + col*unit}px)`;
       const hy = `calc(env(safe-area-inset-${B.y[0] === 'b' ? 'bottom' : 'top'},0px) + ${14 + row*unit}px)`;
@@ -83,6 +84,26 @@
       el.addEventListener('pointermove', e => { if(e.pointerId !== id || !B.look || !cfg.look) return; cfg.look(e.clientX - lx, e.clientY - ly); lx = e.clientX; ly = e.clientY; });
       el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
       el.addEventListener('contextmenu', e => e.preventDefault());
+    }
+    // full screen: Android/iPad can do it on the first tap in landscape; iPhone Safari can't, so it gets a home-screen tip
+    const de = document.documentElement, reqFS = de.requestFullscreen || de.webkitRequestFullscreen;
+    const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone;
+    const isFS = () => document.fullscreenElement || document.webkitFullscreenElement;
+    const goFS = () => {
+      if(standalone || isFS() || !reqFS || !matchMedia('(orientation:landscape)').matches) return;
+      try{ const r = reqFS.call(de, {navigationUI:'hide'}); if(r && r.catch) r.catch(() => {}); }catch(e){}
+    };
+    document.addEventListener('pointerup', goFS, true);
+    addEventListener('orientationchange', () => setTimeout(goFS, 300));
+    if(!standalone && !reqFS && /iPhone|iPod/.test(navigator.userAgent)){
+      let seen = false; try{ seen = localStorage.getItem('dy-fs-tip') === '1'; }catch(e){}
+      if(!seen){
+        const tip = document.createElement('div'); tip.className = 'fsh';
+        tip.textContent = 'For full screen: tap Share, then "Add to Home Screen", and play from the icon. (Tap to hide)';
+        layer.appendChild(tip);
+        const hide = () => { tip.remove(); try{ localStorage.setItem('dy-fs-tip', '1'); }catch(e){} };
+        tip.addEventListener('pointerdown', hide); setTimeout(hide, 9000);
+      }
     }
     // portrait warning
     const rot = document.createElement('div'); rot.className = 'rot'; rot.textContent = 'Turn your phone sideways to play'; layer.appendChild(rot);
@@ -105,5 +126,10 @@
     area.addEventListener('pointerup', end); area.addEventListener('pointercancel', end);
   }
   function cap(el, id){ try{ el.setPointerCapture(id); }catch(e){} }
+    // home-screen web app runs full screen with no Safari bars
+  if(isTouch){
+    const m = (n, c) => { if(document.querySelector(`meta[name="${n}"]`)) return; const e = document.createElement('meta'); e.name = n; e.content = c; document.head.appendChild(e); };
+    m('apple-mobile-web-app-capable', 'yes'); m('mobile-web-app-capable', 'yes'); m('apple-mobile-web-app-status-bar-style', 'black-translucent');
+  }
   window.TOUCH = {isTouch, init, send};
 })();

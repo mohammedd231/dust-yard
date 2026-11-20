@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Dust Yard Drift</title>
 <meta name="description" content="Drift a Mazda RX-7 or a JDM drift car around Cougar Circuit with your friends.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -66,7 +69,7 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
 .load{height:3px;background:rgba(235,236,240,.1)} .load i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 @media (max-width:600px){.board{display:none}.score .cur{font-size:40px}}
 /* phones: the speed panel moves to the bottom middle, between the steering and pedal buttons */
-html.touch .dash{right:auto;left:50%;transform:translateX(-50%) scale(.62);transform-origin:bottom center;bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:calc(env(safe-area-inset-right,0px) + 74px);transform:scale(.5);transform-origin:top right;min-width:260px}
 </style>
 </head>
 <body>
@@ -764,6 +767,7 @@ function updateCar(dt){
   sun.position.set(S.x + SUN_DIR.x*120, S.y + SUN_DIR.y*120, S.z + SUN_DIR.z*120); sun.target.position.set(S.x, S.y, S.z);
 }
 const camPos = new V3(), camLook = new V3();
+const TOUCH_CAM = !!(window.TOUCH && TOUCH.isTouch);
 function positionCamera(dt, snap){
   if(!car) return;
   car.updateMatrixWorld(true);
@@ -775,13 +779,14 @@ function positionCamera(dt, snap){
     // chase: swing behind the direction of travel a little, so a drift shows the car's angle
     const v = Math.hypot(S.vx, S.vz), fx = Math.sin(S.h), fz = Math.cos(S.h);
     let dx = fx, dz = fz; if(v > 5){ const mx = S.vx/v, mz = S.vz/v; dx = lerp(fx, mx, 0.55); dz = lerp(fz, mz, 0.55); const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
-    const want = new V3(S.x - dx*6.2, S.y + 2.3, S.z - dz*6.2);
+    const PH = TOUCH_CAM, cd = PH ? 4.9 : 6.2;
+    const want = new V3(S.x - dx*cd, S.y + (PH ? 1.9 : 2.3), S.z - dz*cd);
     want.y = Math.max(want.y, hAt(want.x, want.z) + 0.8);
     const k = snap ? 1 : 1 - Math.exp(-dt*5);
     camPos.lerp(want, k); camLook.lerp(new V3(S.x + fx*2, S.y + 0.9, S.z + fz*2), snap ? 1 : 1 - Math.exp(-dt*10));
     camera.position.copy(camPos); camera.lookAt(camLook); camera.near = 0.1;
   }
-  const fov = (camMode === 1 ? 70 : 62) + Math.min(10, Math.hypot(S.vx, S.vz)*0.12);
+  const fov = (camMode === 1 ? 70 : TOUCH_CAM ? 52 : 62) + Math.min(10, Math.hypot(S.vx, S.vz)*0.12);
   if(Math.abs(camera.fov - fov) > 0.05 || camera.near !== camera._n){ camera.fov = fov; camera._n = camera.near; camera.updateProjectionMatrix(); }
   sky.position.copy(camera.position);
 }
@@ -968,12 +973,12 @@ frame();
 
 /* ---------- phone / tablet controls ---------- */
 if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ buttons:[
-  { label:'◀', x:'l0', y:'b0', size:'lg', wide:true, code:'KeyA' },
-  { label:'▶', x:'l1.55', y:'b0', size:'lg', wide:true, code:'KeyD' },
-  { label:'Gas', x:'r0', y:'b0', size:'lg', wide:true, code:'KeyW' },
-  { label:'Brake', x:'r1.55', y:'b0', size:'lg', wide:true, code:'KeyS' },
+  { label:'◀', x:'l0', y:'b0', size:'md', wide:true, code:'KeyA' },
+  { label:'▶', x:'l1', y:'b0', size:'md', wide:true, code:'KeyD' },
+  { label:'Gas', x:'r0', y:'b0', size:'md', wide:true, code:'KeyW' },
+  { label:'Brake', x:'r1', y:'b0', size:'md', wide:true, code:'KeyS' },
   { label:'II', x:'r0', y:'t0', size:'sm', code:'Escape' },
-  { label:'Hand brake', x:'r0.1', y:'b2', code:'Space', buzz:true },
+  { label:'Hand brake', x:'r0.04', y:'b1.3', size:'md', code:'Space', buzz:true },
   { label:'Reset', x:'l0', y:'t0', size:'sm', code:'KeyR' }
 ] });
 })();

@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Dust Yard GP</title>
 <meta name="description" content="Time-trial an F1 car around the Shanghai International Circuit in your browser.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -84,7 +87,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 @media (max-width:600px){.map{display:none}.dash{min-width:190px}.speed{font-size:48px}.gear{font-size:40px}}
 @media (prefers-reduced-motion:reduce){.warn,.bar i{transition:none}}
 /* phones: the speed panel moves to the bottom middle, between the steering and pedal buttons */
-html.touch .dash{right:auto;left:50%;transform:translateX(-50%) scale(.62);transform-origin:bottom center;bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:calc(env(safe-area-inset-right,0px) + 74px);transform:scale(.5);transform-origin:top right;min-width:260px}
 html.touch .map{display:none}
 </style>
 </head>
@@ -644,7 +647,7 @@ function positionCamera(dt, snap){
   const speed = Math.hypot(S.vx, S.vz);
   if(camMode !== 2 && bumpT > 0) camera.position.y += Math.sin(bumpT*90)*0.02;
   camera.lookAt(camLook);
-  const fov = c.fov + Math.min(10, speed*0.09);
+  const fov = c.fov - (camMode === 2 && window.TOUCH && TOUCH.isTouch ? 10 : 0) + Math.min(10, speed*0.09);
   if(Math.abs(camera.fov - fov) > 0.05){ camera.fov = fov; camera.updateProjectionMatrix(); }
   camera.near = camMode === 0 ? 0.03 : 0.1; camera.updateProjectionMatrix();
 }
@@ -901,10 +904,10 @@ window.__race = {S, CAMS, WHEELS, setCam, placeOnTrack, get CL(){ return CL; }};
 
 /* ---------- phone / tablet controls ---------- */
 if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ buttons:[
-  { label:'◀', x:'l0', y:'b0', size:'lg', wide:true, code:'KeyA' },
-  { label:'▶', x:'l1.55', y:'b0', size:'lg', wide:true, code:'KeyD' },
-  { label:'Gas', x:'r0', y:'b0', size:'lg', wide:true, code:'KeyW' },
-  { label:'Brake', x:'r1.55', y:'b0', size:'lg', wide:true, code:'KeyS' },
+  { label:'◀', x:'l0', y:'b0', size:'md', wide:true, code:'KeyA' },
+  { label:'▶', x:'l1', y:'b0', size:'md', wide:true, code:'KeyD' },
+  { label:'Gas', x:'r0', y:'b0', size:'md', wide:true, code:'KeyW' },
+  { label:'Brake', x:'r1', y:'b0', size:'md', wide:true, code:'KeyS' },
   { label:'II', x:'r0', y:'t0', size:'sm', code:'Escape' },
   { label:'Cam', x:'l0', y:'t0', size:'sm', code:'KeyC' },
   { label:'Line', x:'l0.8', y:'t0', size:'sm', code:'KeyL' },
