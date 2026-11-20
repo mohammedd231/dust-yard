@@ -682,7 +682,7 @@ function initAudio(){
    up or slowed down to the live rpm and they cross-fade, like most racing games. The synth stays
    as the fallback while they load (or if they fail). */
 const SAMPLES = {
-  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8]]   // at the limiter the anti-lag rides on top of the same engine, not instead of it, pops:4, flutter:true, vol:1.25 }
+  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8]], pops:4, flutter:true, vol:1.25 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
 };
 function loadSamples(){
   for(const key in SAMPLES){
