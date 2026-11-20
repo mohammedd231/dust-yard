@@ -365,7 +365,8 @@ function step(dt){
   let vx = S.vx*fx + S.vz*fz, vy = S.vx*yx + S.vz*yz, r = S.r;
   const sp = Math.abs(vx);
   // steering: quick hands; lock shrinks a bit with speed but stays big enough to counter-steer
-  const lock = 0.62/(1 + sp/38);
+  // drift cars run extra lock so you can catch a big angle
+  const lock = S.driftMode ? 0.9/(1 + sp/60) : 0.62/(1 + sp/38);
   S.steer = lerp(S.steer, st*lock, 1 - Math.exp(-dt*(st ? 7 : 10)));
   // gearbox
   const R = C.gears, wr = C.wheelR || 0.31;
@@ -397,10 +398,19 @@ function step(dt){
   const af = S.steer - Math.atan2(vy + a*r, vxs)*sgn, ar = -Math.atan2(vy - b*r, vxs)*sgn;
   // drift mode starts only when you pull the handbrake, and ends once the car is straight again
   const slideAng = sp > 2 ? Math.abs(Math.atan2(vy, Math.abs(vx))) : 0;
-  if(hb && sp > 4) S.driftMode = true;
-  if(S.driftMode && !hb){ S.straightT = slideAng < 0.1 ? (S.straightT || 0) + dt : 0; if(S.straightT > 0.35) S.driftMode = false; }
+  if(hb && sp > 4){ S.driftMode = true; S.straightT = 0; S.hbT = 0.45; }
+  if(S.hbT > 0) S.hbT -= dt;
+  if(S.driftMode && !hb){
+    // back near straight (under ~6 degrees) for a moment, or too slow: the drift is over until the next handbrake pull
+    S.straightT = slideAng < 0.1 && !(S.hbT > 0) ? (S.straightT || 0) + dt : 0;
+    if(S.straightT > 0.12 || vmag < 5) S.driftMode = false;
+  }
+  // how deep in the slide we are: 0 near straight, 1 from ~14 degrees. Power only keeps the rears loose while you hold an angle;
+  // let the angle come back and the tyres hook up again, the car straightens and drift mode switches off
+  const depth = S.driftMode ? (hb || S.hbT > 0 ? 1 : clamp((slideAng - 0.1)/0.15, 0, 1)) : 0;
+  S.depth = depth;
   // grip driving: tyres hold on past their peak; in a drift they let go like real tyres
-  const fall = S.driftMode ? 1.5 : 1.15;
+  const fall = 1.15 + 0.35*depth;
   const tyre = (al, D, B) => D*Math.sin(fall*Math.atan(B*al));
   let Df = mu*Fzf, Dr = mu*Fzr;
   // brakes
@@ -411,7 +421,7 @@ function step(dt){
   let Fxf = -Fbf*sgn, Fxr = -Fbr*sgn;
   // pointing straight, the rears hook up (a driver feeds the throttle in); turned in, all the power can break them loose
   // traction control while grip driving; once drifting, the throttle can spin the rears to hold the slide
-  if(C.drive === 'rwd') drive = Math.min(drive, Dr*(S.driftMode ? 1.55 : 0.9)); else drive = Math.min(drive, Df*0.97);
+  if(C.drive === 'rwd') drive = Math.min(drive, Dr*(0.9 + 0.4*depth)); else drive = Math.min(drive, Df*0.97);
   if(C.drive === 'rwd') Fxr += drive; else Fxf += drive;
   const ell = (Fx, D) => Math.sqrt(Math.max(0, 1 - Math.min(1, (Fx/D)*(Fx/D))));
   // handbrake: locked rears give up nearly all side grip; wheelspin does the same on a rwd car
