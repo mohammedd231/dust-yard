@@ -40,7 +40,8 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 .board li.me span{color:var(--amber)}
 .cam{position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--panel);border:1px solid var(--line);padding:8px 12px}
 .cam b{font-family:var(--display);font-size:18px;letter-spacing:.04em;margin:0 8px}
-#menu{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse at 30% 20%,rgba(255,90,31,.16),transparent 60%),rgba(8,9,11,.82);z-index:5;padding:20px;overflow:auto}
+#menu{position:fixed;inset:0;display:grid;place-items:center start;background:linear-gradient(90deg,rgba(8,9,11,.88) 0,rgba(8,9,11,.6) 560px,rgba(8,9,11,0) 820px);z-index:5;padding:20px 20px 20px max(20px,4vw);overflow:auto}
+@media (max-width:900px){#menu{place-items:center;background:rgba(8,9,11,.78)}}
 .card{width:min(560px,100%);background:#111317;border:1px solid var(--line);padding:26px 26px 22px;display:flex;flex-direction:column;gap:14px}
 .eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
 h1{font-family:var(--display);font-weight:800;font-size:46px;line-height:.95;margin:0;letter-spacing:.01em}
@@ -71,7 +72,6 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
 <div id="hud" hidden>
   <div class="score"><div class="cur" id="sCur"></div><div class="mult" id="sMult"></div><div class="msg" id="sMsg"></div></div>
   <div class="board" id="board"><div class="lbl" id="boardHd">Drift score</div><ol id="boardList"></ol></div>
-  <div class="cam"><span class="lbl">Camera</span><b id="camTxt">Chase</b><span class="lbl">C to change</span></div>
   <div class="dash"><div><span class="spd" id="spd">0</span> <span class="lbl">km/h</span></div><div class="gear" id="gear">N</div><div class="rpm" id="rpm"></div></div>
 </div>
 <div id="menu">
@@ -96,7 +96,6 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
       <dt>A / D</dt><dd>Steer</dd>
       <dt>Space</dt><dd>Handbrake</dd>
       <dt>E / Q</dt><dd>Shift up / down (M toggles manual gears)</dd>
-      <dt>C</dt><dd>Chase or cockpit camera</dd>
       <dt>R</dt><dd>Back on the road</dd>
       <dt>Esc</dt><dd>Menu</dd>
     </dl>
@@ -159,7 +158,7 @@ function loadCar(key, cb){
   C.loading = [cb];
   loader.load(C.file, g => { prepCar(C, g.scene); const l = C.loading; C.loading = null; l.forEach(f => f && f(C)); }, undefined, () => $('status').textContent = "Couldn't load the car.");
 }
-loadCar(carKey, () => { loaded++; loadBar(); maybeReady(); });
+loadCar(carKey, () => { loaded++; loadBar(); maybeReady(); Object.keys(CARS).forEach(k => loadCar(k)); });
 
 /* Height and wall map, built once from the circuit's own triangles (0.5 m cells):
    gentle faces become road/terrain height; steep faces (barriers, walls, trees) become obstacles. */
@@ -355,7 +354,7 @@ const S = { x:0, z:0, y:0, h:0, vx:0, vz:0, r:0, steer:0, rpm:900, gear:1, manua
   pitch:0, roll:0, ax:0, ay:0, slipR:0, drift:0, score:0, combo:1, best:0, total:0, driftT:0, idleT:0, lastDriftEnd:0, popT:0, crackle:0 };
 let car = null, C = null;
 const keys = {};
-let camMode = store.get('cam', 0); const CAMS = ['Chase', 'Cockpit'];
+const camMode = 0;   // chase camera only
 
 function maybeReady(){
   if(loaded < NEED) return;
@@ -370,6 +369,53 @@ function setCar(key){
     car = C.model; scene.add(car);
     S.gear = 1; S.rpm = 900;
   });
+}
+/* Showroom: on the home screen every car sits parked side by side on the grid, seen from the front */
+const SHOW = { cars:{}, order:Object.keys(CARS) };
+function showSlot(key){
+  const i = SHOW.order.indexOf(key), n = SHOW.order.length, off = (i - (n - 1)/2)*3.4;
+  // side by side across the straight (the car's right is -z when it faces +x)
+  return {x:GRID.x, z:GRID.z - 2 - off, h:GRID.h};
+}
+function showroomTick(){
+  for(const k of SHOW.order){
+    const Cc = CARS[k]; if(!Cc.model || SHOW.cars[k]) continue;
+    const g = cloneCar(Cc).g, p = showSlot(k); g.position.set(p.x, hAt(p.x, p.z), p.z); g.rotation.set(0, p.h, 0); scene.add(g); SHOW.cars[k] = g;
+  }
+  for(const k in SHOW.cars) SHOW.cars[k].visible = !S.started || (S.intro > 0 && k !== carKey);
+  if(car) car.visible = S.started;
+}
+function showroomCamera(t){
+  // stand in front of the line-up; the car you picked rolls a little forward
+  const n = SHOW.order.length, a = showSlot(SHOW.order[0]), b = showSlot(SHOW.order[n - 1]);
+  const cx = (a.x + b.x)/2, cz = (a.z + b.z)/2, h = GRID.h, fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h), gy = hAt(cx, cz);
+  const wide = innerWidth > 900, shift = wide ? 2.9 : 0, sway = Math.sin(t*0.25)*0.7;
+  const want = new V3(cx + fx*9 + rx*sway, gy + 1.6, cz + fz*9 + rz*sway);
+  const look = new V3(cx - rx*shift, gy + 0.5, cz - rz*shift);
+  if(!SHOW.cam){ SHOW.cam = want.clone(); SHOW.look = look.clone(); }
+  SHOW.cam.lerp(want, 0.05); SHOW.look.lerp(look, 0.05);
+  camera.position.copy(SHOW.cam); camera.lookAt(SHOW.look);
+  if(camera.fov !== 50){ camera.fov = 50; camera.updateProjectionMatrix(); }
+  sky.position.copy(camera.position);
+  for(const k in SHOW.cars){ const g = SHOW.cars[k], p = showSlot(k), f = k === carKey ? 0.9 : 0;
+    g.userData.f = lerp(g.userData.f || 0, f, 0.08); g.position.set(p.x + fx*g.userData.f, hAt(p.x, p.z), p.z + fz*g.userData.f); }
+}
+// game start: the camera sweeps from the front of the car round to the chase spot behind it
+function introCamera(dt){
+  S.intro -= dt; const k = clamp(1 - S.intro/S.introLen, 0, 1), e = k*k*(3 - 2*k);
+  const fx = Math.sin(S.h), fz = Math.cos(S.h);
+  // swing round the open side of the car, away from the others in the line-up
+  if(S.introSide === undefined){ const n = SHOW.order.length, a = showSlot(SHOW.order[0]), b = showSlot(SHOW.order[n - 1]);
+    const d = (S.x - (a.x + b.x)/2)*Math.cos(S.h) + (S.z - (a.z + b.z)/2)*(-Math.sin(S.h)); S.introSide = d >= 0 ? 1 : -1; }
+  const ang = e*Math.PI, side = Math.sin(ang)*S.introSide;
+  const dist = lerp(7.5, 6.2, e), hgt = lerp(1.35, 2.3, e) + Math.abs(side)*0.8;
+  const rx = Math.cos(S.h), rz = -Math.sin(S.h);
+  const dx = fx*Math.cos(ang) + rx*side, dz = fz*Math.cos(ang) + rz*side, l = Math.hypot(dx, dz);
+  camera.position.set(S.x + dx/l*dist, S.y + hgt, S.z + dz/l*dist);
+  camera.lookAt(S.x + fx*2*e, S.y + lerp(0.55, 0.9, e), S.z + fz*2*e);
+  const fov = lerp(50, 62, e); if(Math.abs(camera.fov - fov) > 0.05){ camera.fov = fov; camera.updateProjectionMatrix(); }
+  sky.position.copy(camera.position);
+  if(S.intro <= 0){ camPos.copy(camera.position); camLook.set(S.x + fx*2, S.y + 0.9, S.z + fz*2); positionCamera(1, true); }
 }
 // start grid on the main straight
 const GRID = {x:-30, z:-31, h:Math.PI/2};
@@ -677,7 +723,7 @@ function positionCamera(dt, snap){
   if(Math.abs(camera.fov - fov) > 0.05 || camera.near !== camera._n){ camera.fov = fov; camera._n = camera.near; camera.updateProjectionMatrix(); }
   sky.position.copy(camera.position);
 }
-function setCam(i){ camMode = i; store.set('cam', i); $('camTxt').textContent = CAMS[i]; positionCamera(1, true); }
+function setCam(){ positionCamera(1, true); }
 
 /* ---------- HUD ---------- */
 const rpmEl = $('rpm'); for(let i = 0; i < 16; i++){ const s = document.createElement('i'); if(i >= 11) s.className = i >= 14 ? 'r' : 'y'; rpmEl.appendChild(s); }
@@ -702,7 +748,6 @@ addEventListener('keydown', e => {
   if(e.repeat) return;
   if(e.code === 'Escape'){ if(S.started) (S.paused ? resume() : pause()); }
   if(!S.started || S.paused) return;
-  if(e.code === 'KeyC') setCam((camMode + 1) % 2);
   if(e.code === 'KeyE') shift(1);
   if(e.code === 'KeyQ') shift(-1);
   if(e.code === 'KeyM'){ S.manual = !S.manual; store.set('manual', S.manual); msg(S.manual ? 'Manual gears' : 'Automatic gears'); }
@@ -716,7 +761,9 @@ function nearestRoad(x, z){
 }
 function start(){
   initAudio(); if(AC && AC.state === 'suspended') AC.resume();
-  if(!S.started){ S.started = true; spawn(NET.game ? gridSlot() : 0); positionCamera(1, true); }
+  if(!S.started){ S.started = true; spawn(NET.game ? gridSlot() : 0);
+    if(!NET.game){ const p = showSlot(carKey); S.x = p.x + Math.sin(p.h)*0.9; S.z = p.z + Math.cos(p.h)*0.9; S.h = p.h; S.y = hAt(S.x, S.z); }
+    S.introLen = S.intro = 2.2; S.introSide = undefined; for(const k in keys) keys[k] = false; }
   resume();
 }
 function pause(){ S.paused = true; $('menu').hidden = false; $('hud').hidden = true; $('soloBtn').textContent = NET.game ? 'Free drive' : 'Resume'; $('onlineBtn').textContent = NET.game ? 'Resume' : 'Drift online'; }
@@ -842,13 +889,15 @@ function frame(){
   requestAnimationFrame(frame);
   const t = now(), dt = Math.min(0.05, t - last); last = t;
   if(C && HM){
-    if(S.started){ for(let i = 0; i < 2; i++) step(dt/2); }
+    showroomTick();
+    if(S.started && !(S.intro > 0)){ for(let i = 0; i < 2; i++) step(dt/2); }
     updateCar(dt);
     // remember a clean spot to come back to with R
     safeT -= dt; if(safeT <= 0 && S.started && S.kmh > 10 && S.slipR < 0.3){ safeT = 1; S.safe = {x:S.x, z:S.z}; }
     smokeTick(dt); engineSound(dt); netTick(dt); hud(dt);
-    if(S.started) positionCamera(dt, false);
-    else { const a = t*0.08; camera.position.set(S.x + Math.sin(a)*8, S.y + 2.4, S.z + Math.cos(a)*8); camera.lookAt(S.x, S.y + 0.7, S.z); sky.position.copy(camera.position); }
+    if(S.started && S.intro > 0) introCamera(dt);
+    else if(S.started) positionCamera(dt, false);
+    else showroomCamera(t);
   }
   renderer.render(scene, camera);
 }
