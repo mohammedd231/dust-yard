@@ -694,17 +694,19 @@ function initAudio(){
    up or slowed down to the live rpm and they cross-fade, like most racing games. The synth stays
    as the fallback while they load (or if they fail). */
 const SAMPLES = {
-  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8, 0.55]], pops:4, flutter:true, coldstart:true, vol:1.25 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
+  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8, 0.55]], pops:4, flutter:true, coldstart:true, vol:1.25 },
+  // RX-7: the recorded rotary idle (brap-brap) at the bottom, handing over to the synth rotary as the revs rise
+  rx7:{ dir:'sounds/rx7/', prefix:'rx7_', loops:[['idle', 950, 0, 99999]], pops:0, coldUrl:'sounds/supra/supra_coldstart.wav', synthFrom:[1500, 2500], vol:1.3 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
-    const get = n => fetch(P.dir + 'supra_' + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
-    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : []), ...(P.coldstart ? [get('coldstart')] : [])]).then(bufs => {
+    const get = n => fetch(n.includes('/') ? n : P.dir + (P.prefix || 'supra_') + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
+    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : []), ...(P.coldstart ? [get('coldstart')] : P.coldUrl ? [get(P.coldUrl)] : [])]).then(bufs => {
       const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; const comp = AC.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; lp.connect(comp); comp.connect(out); out.connect(A.master);
       P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4], vol:l[5] || 1, boost:l[6] || 0}; });
-      P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[P.loops.length + P.pops] : null; P.coldBuf = P.coldstart ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
-    }).catch(() => {});
+      P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[P.loops.length + P.pops] : null; P.coldBuf = P.coldstart || P.coldUrl ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
+    }).catch(() => { P.failed = true; });
   }
 }
 // turbo flutter ("stututu") when the throttle snaps shut on boost
@@ -719,7 +721,10 @@ function flutter(vol){
 function coldStart(){
   if(!S.started || S.engineOn !== false || S.starting) return;
   initAudio(); if(AC && AC.state === 'suspended') AC.resume();
-  const P = SAMPLES[carKey], buf = P && P.ready && P.coldBuf, fire = 1.7;
+  const P = SAMPLES[carKey];
+  if(P && !P.ready && !P.failed && (S.waitN = (S.waitN || 0) + 1) < 40){ $('ignBtn').firstChild.textContent = 'Loading…'; setTimeout(coldStart, 100); return; }   // give the recordings a moment to arrive
+  S.waitN = 0;
+  const buf = P && P.ready && P.coldBuf, fire = 1.7;
   S.starting = 1; $('ignBtn').classList.add('busy'); $('ignBtn').firstChild.textContent = 'Starting…';
   if(AC){
     const src = AC.createBufferSource(), g = AC.createGain(); g.gain.value = 1.15;
@@ -736,7 +741,7 @@ function coldStart(){
 }
 $('ignBtn').addEventListener('click', coldStart);
 function samplePop(vol){
-  const P = SAMPLES[carKey]; if(!P || !P.ready) return false;
+  const P = SAMPLES[carKey]; if(!P || !P.ready || !P.popBufs.length) return false;
   const s = AC.createBufferSource(); s.buffer = P.popBufs[Math.random()*P.popBufs.length|0]; s.playbackRate.value = 0.9 + Math.random()*0.25;
   const g = AC.createGain(); g.gain.value = 0.9*vol; s.connect(g); g.connect(A.master); s.start(); return true;
 }
@@ -759,6 +764,8 @@ function engineSound(dt){
   const P = SAMPLES[carKey], rec = P && P.ready;
   // the engine fades in as the cold-start recording settles to idle (or at once if you hit the gas)
   if(S.engineOn !== false && S.engGain < 1) S.engGain = Math.min(1, (S.engGain || 0) + dt*(S.thr ? 4 : 1.1));
+  // cars with only low-rev recordings hand over to the synth as the revs climb (equal-power)
+  const mixS = rec && P.synthFrom ? Math.sin(Math.PI/2*clamp((rpm - P.synthFrom[0])/(P.synthFrom[1] - P.synthFrom[0]), 0, 1)) : 0;
   const eg = S.engineOn === false ? 0 : (S.engGain === undefined ? 1 : Math.max(0, S.engGain));
   for(const k in SAMPLES){ const Q = SAMPLES[k]; if(Q.ready && Q !== P) Q.out.gain.setTargetAtTime(0, t, 0.05); }
   if(rec){
@@ -771,9 +778,9 @@ function engineSound(dt){
       L.g.gain.setTargetAtTime(w*L.vol, t, 0.03);
     });
     P.lp.frequency.setTargetAtTime(load > 0.5 ? 9000 : 1800 + rpm*0.25, t, 0.05);
-    P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol*eg, t, 0.03);
+    P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol*eg*Math.sqrt(1 - mixS*mixS), t, 0.03);
   }
-  A.eng.gain.setTargetAtTime(rec ? 0 : (S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol*eg, t, 0.03);
+  A.eng.gain.setTargetAtTime((rec ? mixS : 1)*(S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol*eg, t, 0.03);
   A.ng.gain.setTargetAtTime((0.02 + load*0.05*rpm/C.redline)*eg, t, 0.05); A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
   A.tg.gain.setTargetAtTime(S.kmh > 12 ? clamp(S.slipR - 0.25, 0, 1)*0.5 : 0, t, 0.05); A.tf.frequency.setTargetAtTime(1300 + S.slipR*600, t, 0.08);
   // lift-off pops and crackles from high revs
