@@ -157,8 +157,9 @@ loader.load('models/drift/track.glb', g => {
     ms.forEach(m => { if(m.map) m.map.anisotropy = 4; if(m.transparent || m.alphaTest){ m.alphaTest = Math.max(m.alphaTest || 0, 0.45); m.transparent = false; } }); } });
   scene.add(g.scene); TRACK = g.scene; TRACK.updateMatrixWorld(true);
   HM = buildHeightmap(TRACK);
-  loaded++; loadBar(); maybeReady();
-}, undefined, () => $('status').textContent = "Couldn't load the circuit. Check your connection and reload.");
+  loaded++; loadBar(); if(loaded < NEED) $('status').textContent = 'Loading the car…'; maybeReady();
+}, e => { if(e.total){ const p = Math.round(e.loaded/e.total*100); $('status').textContent = 'Loading the circuit… ' + p + '%'; $('loadBar').style.width = Math.round(p*0.5) + '%'; } },
+  () => $('status').textContent = "Couldn't load the circuit. Check your connection and reload.");
 let carKey = store.get('car', 'rx7'); if(!CARS[carKey]) carKey = 'rx7';
 function loadCar(key, cb){
   const C = CARS[key];
