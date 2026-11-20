@@ -230,7 +230,35 @@ function blocked(x, z, y){
 }
 
 /* ---------- cars ---------- */
+/* Studio reflections for the cars: metallic paint and chrome only look right when there's something to reflect */
+let CAR_ENV = null;
+function carEnv(){
+  if(CAR_ENV) return CAR_ENV;
+  // a small cube map painted on canvases: bright sky above, soft horizon, darker ground, a light panel overhead
+  const N = 128, faces = [];
+  const dirOf = (f, u, v) => { const a = 2*u - 1, b = 2*v - 1;
+    return [[1, -b, -a], [-1, -b, a], [a, 1, b], [a, -1, -b], [a, -b, 1], [-a, -b, -1]][f]; };
+  for(let f = 0; f < 6; f++){
+    const cv = document.createElement('canvas'); cv.width = cv.height = N; const g = cv.getContext('2d'), im = g.createImageData(N, N);
+    for(let j = 0; j < N; j++) for(let i = 0; i < N; i++){
+      const d = dirOf(f, (i + 0.5)/N, (j + 0.5)/N), L = Math.hypot(d[0], d[1], d[2]), y = d[1]/L;
+      let c;
+      if(y > 0){ const t = Math.min(1, y/0.7); c = [240 - 140*t, 246 - 100*t, 255 - 40*t]; if(y > 0.9) c = [255, 255, 255]; }
+      else { const t = Math.min(1, -y/0.4); c = [150 - 95*t, 145 - 92*t, 138 - 88*t]; }
+      im.data.set([c[0], c[1], c[2], 255], (j*N + i)*4); }
+    g.putImageData(im, 0, 0); faces.push(cv);
+  }
+  CAR_ENV = new THREE.CubeTexture(faces); CAR_ENV.encoding = THREE.sRGBEncoding; CAR_ENV.needsUpdate = true;
+  return CAR_ENV;
+}
 function prepCar(C, m){
+  // give every material reflections; painted body panels are a clear-coated dielectric, not bare metal
+  m.traverse(o => { if(!o.isMesh) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(mt => {
+    if(!mt || !('envMap' in mt)) return; mt.envMap = carEnv(); mt.envMapIntensity = 1;
+    if(/^body$|paint/i.test(mt.name || '') && mt.metalness > 0.5 && !mt.metalnessMap){ mt.metalness = 0.35; mt.roughness = Math.min(mt.roughness, 0.3); }
+    // opaque black 'glass' (the RX-7 ships its windows like that): make it real tinted glass you can see through
+    if(/glass|window/i.test(mt.name || '') && !mt.transparent && !mt.map){ mt.transparent = true; mt.opacity = 0.3; mt.depthWrite = false; mt.roughness = 0.05; mt.metalness = 0; }
+    mt.needsUpdate = true; }); });
   // drop display stands / ground planes that came with the model (big and flat)
   m.updateMatrixWorld(true);
   { const all = new THREE.Box3().setFromObject(m).getSize(new V3()), span = Math.max(all.x, all.z), drop = [];
@@ -297,14 +325,17 @@ function prepCar(C, m){
   // no interior in the model: sit on the right (JDM cars are right-hand drive), just under the roof
   const rb = new THREE.Box3().setFromObject(root);
   const swc = sw ? root.worldToLocal(new THREE.Box3().setFromObject(sw).getCenter(new V3())) : new V3(-0.36, rb.max.y - 0.62, 0.15);
-  C.eye = new V3(swc.x, swc.y + 0.32, swc.z - 0.52);
+  C.eye = sw ? new V3(swc.x, swc.y + 0.32, swc.z - 0.52) : new V3(-0.36, rb.max.y - 0.36, 0.12);
   C.wheelR = wheels.length ? wheels[0].r : 0.31;
   C.exhaust = new V3(-Math.sign(swc.x || 1)*0.45, 0.3, -2.12);
   // clear the windscreen: anything opaque right in front of the driver's eyes (a tint panel on the civic) goes
   { root.updateMatrixWorld(true); const rc = new THREE.Raycaster(), eyeW = root.localToWorld(C.eye.clone()), hide = new Set(), skip = o => { for(let q = o; q; q = q.parent) if(q === swPivot) return true; return false; };
     for(let yaw = -0.5; yaw <= 0.5; yaw += 0.1) for(let pit = -0.02; pit <= 0.25; pit += 0.06){
       rc.set(eyeW, new V3(Math.sin(yaw)*Math.cos(pit), Math.sin(pit), Math.cos(yaw)*Math.cos(pit)).normalize()); rc.far = 1.3;
-      for(const h of rc.intersectObject(m, true)){ const mt = h.object.material; if(skip(h.object) || (mt && (mt.transparent || mt.opacity < 1))) continue; hide.add(h.object); break; } }
+      for(const h of rc.intersectObject(m, true)){ const mt = h.object.material; if(skip(h.object) || (mt && (mt.transparent || mt.opacity < 1))) continue;
+        // never hide a whole body shell: only small parts (a tint strip, a sun visor) get cleared
+        const sz = new THREE.Box3().setFromObject(h.object).getSize(new V3()); if(Math.max(sz.x, sz.y, sz.z) > 1.6) break;
+        hide.add(h.object); break; } }
     hide.forEach(o => { o.visible = false; }); C.hidden = hide.size; }
   C.model = root; C.wheels = wheels; C.sw = swPivot;
   C.wheelbase = wheels.length >= 4 ? (Math.max(...wheels.map(w => w.steer.position.z)) - Math.min(...wheels.map(w => w.steer.position.z))) : 2.5;
