@@ -266,6 +266,17 @@ function neonTex(){
     im.data.set([255, 255, 255, Math.round(255*a)], (j*128 + i)*4); }
   g.putImageData(im, 0, 0); NEON_TEX = new THREE.CanvasTexture(c); return NEON_TEX;
 }
+let NEON_REAR = null;
+function neonRearTex(){
+  if(NEON_REAR) return NEON_REAR;
+  // one bar across the back of the car, fading at the corners
+  const c = document.createElement('canvas'); c.width = 128; c.height = 64; const g = c.getContext('2d'), im = g.createImageData(128, 64);
+  for(let j = 0; j < 64; j++) for(let i = 0; i < 128; i++){
+    const u = Math.abs(i/127*2 - 1), v = j/63*2 - 1;
+    const a = Math.exp(-Math.pow(v/(v < 0 ? 0.18 : 0.42), 2))*clamp((0.95 - u)/0.25, 0, 1);
+    im.data.set([255, 255, 255, Math.round(255*clamp(a*1.1, 0, 1))], (j*128 + i)*4); }
+  g.putImageData(im, 0, 0); NEON_REAR = new THREE.CanvasTexture(c); return NEON_REAR;
+}
 function prepCar(C, m){
   // give every material reflections; painted body panels are a clear-coated dielectric, not bare metal
   m.traverse(o => { if(!o.isMesh) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(mt => {
@@ -373,10 +384,15 @@ function prepCar(C, m){
       // a coloured layer for the hue plus an additive one on top so it really shines
       const gw = (Wd - 0.2)/0.62;
       for(const add of [false, true]){
-        const glow = new THREE.Mesh(new THREE.PlaneGeometry(gw, L + 0.6), new THREE.MeshBasicMaterial({map:neonTex(), color:add ? col.clone().multiplyScalar(1.3) : col, transparent:true, opacity:add ? 0.9 : 1, blending:add ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite:false, toneMapped:false}));
-        glow.rotation.x = -Math.PI/2; glow.position.set((b2.min.x + b2.max.x)/2, add ? 0.075 : 0.07, (b2.min.z + b2.max.z)/2); glow.renderOrder = add ? 3 : 2; root.add(glow); }
+        const glow = new THREE.Mesh(new THREE.PlaneGeometry(gw, L + 0.6), new THREE.MeshBasicMaterial({map:neonTex(), color:add ? col.clone().multiplyScalar(1.3) : col, transparent:true, opacity:add ? 0.55 : 0.75, blending:add ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite:false, toneMapped:false}));
+        glow.rotation.x = -Math.PI/2; glow.position.set((b2.min.x + b2.max.x)/2, add ? 0.075 : 0.07, (b2.min.z + b2.max.z)/2); glow.renderOrder = add ? 3 : 2; root.add(glow);
+        // and a bar across the back, spilling out behind the bumper
+        const rear = new THREE.Mesh(new THREE.PlaneGeometry(Wd - 0.1, 1.1), glow.material);
+        rear.rotation.x = -Math.PI/2; rear.position.set((b2.min.x + b2.max.x)/2, glow.position.y + 0.002, b2.min.z + 0.12); rear.renderOrder = glow.renderOrder; root.add(rear);
+        rear.material = glow.material.clone(); rear.material.map = neonRearTex(); }
       const tubeM = new THREE.MeshBasicMaterial({color:col.clone().multiplyScalar(2.5), toneMapped:false});
       for(const sx of [-1, 1]){ const tube = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, L*0.7), tubeM); tube.position.set((b2.min.x + b2.max.x)/2 + sx*(Wd/2 - 0.22), 0.16, (b2.min.z + b2.max.z)/2); root.add(tube); }
+      { const tube = new THREE.Mesh(new THREE.BoxGeometry(Wd*0.6, 0.035, 0.05), tubeM); tube.position.set((b2.min.x + b2.max.x)/2, 0.2, b2.min.z + 0.3); root.add(tube); }
     } }
   C.model = root; C.wheels = wheels; C.sw = swPivot;
   C.wheelbase = wheels.length >= 4 ? (Math.max(...wheels.map(w => w.steer.position.z)) - Math.min(...wheels.map(w => w.steer.position.z))) : 2.5;
