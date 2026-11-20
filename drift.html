@@ -25,6 +25,12 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 #stage{position:fixed;inset:0} #stage canvas{display:block;width:100%;height:100%}
 .lbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
 #hud{position:fixed;inset:0;pointer-events:none;font-variant-numeric:tabular-nums}
+.ign{position:fixed;left:50%;bottom:calc(22% + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:6;padding:16px 34px;border-radius:999px;border:2px solid rgba(255,90,50,.85);background:rgba(18,10,8,.72);color:#fff;font:800 22px/1.1 var(--display),system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;display:grid;gap:4px;text-align:center;box-shadow:0 0 28px rgba(255,70,30,.45);animation:ignPulse 1.4s ease-in-out infinite}
+.ign small{font:600 11px/1 system-ui,sans-serif;letter-spacing:.06em;opacity:.7;text-transform:none}
+.ign[hidden]{display:none}.ign.busy{animation:none;opacity:.55;pointer-events:none}
+html.touch .ign small{display:none}
+html.touch .ign{bottom:auto;top:calc(26% + env(safe-area-inset-top,0px));padding:10px 24px;font-size:16px}
+@keyframes ignPulse{50%{box-shadow:0 0 44px rgba(255,70,30,.8)}}
 .dash{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--panel);border:1px solid var(--line);padding:12px 16px;min-width:280px;display:grid;grid-template-columns:1fr auto;gap:2px 18px;align-items:end}
 .dash .spd{font-family:var(--display);font-weight:800;font-size:64px;line-height:.9}
 .dash .gear{font-family:var(--display);font-weight:800;font-size:56px;line-height:.9;color:var(--amber);text-align:right}
@@ -79,6 +85,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
   <div class="board" id="board"><div class="lbl" id="boardHd">Drift score</div><ol id="boardList"></ol></div>
   <div class="dash"><div><span class="spd" id="spd">0</span> <span class="lbl">km/h</span></div><div class="gear" id="gear">N</div><div class="rpm" id="rpm"></div></div>
 </div>
+<button id="ignBtn" class="ign" type="button" hidden>Cold start<small>Press I or Enter</small></button>
 <div id="menu">
   <div class="card">
     <div class="eyebrow">Dust Yard · Cougar Circuit</div>
@@ -503,6 +510,7 @@ function step(dt){
   let thr = keys.KeyW || keys.ArrowUp ? 1 : 0, brk = keys.KeyS || keys.ArrowDown ? 1 : 0, hb = keys.Space ? 1 : 0;
   const st = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0);
   if(S.paused){ thr = brk = 0; hb = 1; }
+  if(S.engineOn === false) thr = 0;   // cold start first
   const fx = Math.sin(S.h), fz = Math.cos(S.h), yx = Math.cos(S.h), yz = -Math.sin(S.h);
   let vx = S.vx*fx + S.vz*fz, vy = S.vx*yx + S.vz*yz, r = S.r;
   const sp = Math.abs(vx);
@@ -534,7 +542,7 @@ function step(dt){
   // on the gas in a slide the revs climb to the limiter and sit there (anti-lag) until the car straightens up
   const revT = onPower && sliding && sp > 4 ? C.redline + 100 : onPower ? Math.max(rpm, rpm + (S.slipR > 0.3 ? 1800*S.slipR : 0)) : rpm;
   S.rpm = lerp(S.rpm, revT, 1 - Math.exp(-dt*(revT > rpm + 500 ? 4 : 12)));
-  S.rpm = clamp(S.rpm, 850, C.redline + 150);
+  S.rpm = S.engineOn === false ? 0 : clamp(S.rpm, 850, C.redline + 150);
   // loads and tyre forces
   const m = C.mass, Lw = C.wheelbase || 2.5, a = Lw*0.48, b = Lw*0.52, Iz = m*1.45;
   const Fz = m*9.81, dW = m*S.ax*0.5/Lw;
@@ -683,16 +691,16 @@ function initAudio(){
    up or slowed down to the live rpm and they cross-fade, like most racing games. The synth stays
    as the fallback while they load (or if they fail). */
 const SAMPLES = {
-  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8]], pops:4, flutter:true, vol:1.25 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
+  jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8, 0.55]], pops:4, flutter:true, coldstart:true, vol:1.25 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
     const get = n => fetch(P.dir + 'supra_' + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
-    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : [])]).then(bufs => {
+    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : []), ...(P.coldstart ? [get('coldstart')] : [])]).then(bufs => {
       const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; const comp = AC.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; lp.connect(comp); comp.connect(out); out.connect(A.master);
-      P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4], vol:l[5] || 1}; });
-      P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
+      P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4], vol:l[5] || 1, boost:l[6] || 0}; });
+      P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[P.loops.length + P.pops] : null; P.coldBuf = P.coldstart ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
     }).catch(() => {});
   }
 }
@@ -703,6 +711,24 @@ function flutter(vol){
   const s = AC.createBufferSource(); s.buffer = P.flutterBuf; s.playbackRate.value = 0.95 + Math.random()*0.12;
   const g = AC.createGain(); g.gain.value = vol; s.connect(g); g.connect(A.master); s.start();
 }
+/* Cold start: the engine is off when you roll out. The button (or I / Enter) cranks it over: the Supra plays
+   its real cold-start recording (starter, catch, flare, settle); the others crank and catch on the synth. */
+function coldStart(){
+  if(!S.started || S.engineOn !== false || S.starting) return;
+  initAudio(); if(AC && AC.state === 'suspended') AC.resume();
+  const P = SAMPLES[carKey], buf = P && P.ready && P.coldBuf, fire = 1.7;
+  S.starting = 1; $('ignBtn').classList.add('busy'); $('ignBtn').firstChild.textContent = 'Starting…';
+  if(AC){
+    const src = AC.createBufferSource(), g = AC.createGain(); g.gain.value = 1.15;
+    if(buf){ src.buffer = buf; src.connect(g); g.connect(A.master); src.start(); }
+    else { src.buffer = A.nb; const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 220; bp.Q.value = 3; const am = AC.createGain(); am.gain.value = 0; const lfo = AC.createOscillator(); lfo.frequency.value = 9; const lg = AC.createGain(); lg.gain.value = 0.5; lfo.connect(lg); lg.connect(am.gain); src.connect(bp); bp.connect(am); am.connect(g); g.connect(A.master); src.start(); lfo.start(); src.stop(AC.currentTime + 1.3); lfo.stop(AC.currentTime + 1.3); }
+  }
+  setTimeout(() => {
+    S.engineOn = true; S.starting = 0; S.rpm = buf ? 1100 : 2300; S.engGain = buf ? -0.9 : 0.3;   // the recording carries the flare, so the live engine waits under it
+    $('ignBtn').hidden = true; $('ignBtn').classList.remove('busy'); $('ignBtn').firstChild.textContent = 'Cold start';
+  }, (buf ? fire : 1.3)*1000);
+}
+$('ignBtn').addEventListener('click', coldStart);
 function samplePop(vol){
   const P = SAMPLES[carKey]; if(!P || !P.ready) return false;
   const s = AC.createBufferSource(); s.buffer = P.popBufs[Math.random()*P.popBufs.length|0]; s.playbackRate.value = 0.9 + Math.random()*0.25;
@@ -725,20 +751,24 @@ function engineSound(dt){
   const load = S.thr && S.shiftT <= 0 ? 1 : 0.25;
   A.lp.frequency.setTargetAtTime(V.lp[0] + load*V.lp[1] + rpm*V.lp[2], t, 0.04);
   const P = SAMPLES[carKey], rec = P && P.ready;
+  // the engine fades in as the cold-start recording settles to idle (or at once if you hit the gas)
+  if(S.engineOn !== false && S.engGain < 1) S.engGain = Math.min(1, (S.engGain || 0) + dt*(S.thr ? 4 : 1.4));
+  const eg = S.engineOn === false ? 0 : (S.engGain === undefined ? 1 : Math.max(0, S.engGain));
   for(const k in SAMPLES){ const Q = SAMPLES[k]; if(Q.ready && Q !== P) Q.out.gain.setTargetAtTime(0, t, 0.05); }
   if(rec){
     // pick the two nearest recordings, pitch each to the live revs, equal-power blend between them
     P.layers.forEach((L, i) => {
       L.s.playbackRate.setTargetAtTime(clamp(rpm/L.base, 0.5, 3.2), t, 0.02);
       const fade = L.fade || (L.hi - L.lo)*0.3, a = i === 0 ? 1 : (rpm - L.lo)/fade, b = i === P.layers.length - 1 ? 1 : (L.hi - rpm)/fade;
-      const w = Math.sin(Math.PI/2*clamp(Math.min(a, b, 1), 0, 1));
+      let w = Math.sin(Math.PI/2*clamp(Math.min(a, b, 1), 0, 1));
+      if(L.boost && S.thr && S.shiftT <= 0) w = Math.max(w, clamp((S.kmh - 30)/10, 0, 1)*L.boost);   // turbo on boost from ~35 km/h
       L.g.gain.setTargetAtTime(w*L.vol, t, 0.03);
     });
     P.lp.frequency.setTargetAtTime(load > 0.5 ? 9000 : 1800 + rpm*0.25, t, 0.05);
-    P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol, t, 0.03);
+    P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol*eg, t, 0.03);
   }
-  A.eng.gain.setTargetAtTime(rec ? 0 : (S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol, t, 0.03);
-  A.ng.gain.setTargetAtTime(0.02 + load*0.05*rpm/C.redline, t, 0.05); A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
+  A.eng.gain.setTargetAtTime(rec ? 0 : (S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol*eg, t, 0.03);
+  A.ng.gain.setTargetAtTime((0.02 + load*0.05*rpm/C.redline)*eg, t, 0.05); A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
   A.tg.gain.setTargetAtTime(S.kmh > 12 ? clamp(S.slipR - 0.25, 0, 1)*0.5 : 0, t, 0.05); A.tf.frequency.setTargetAtTime(1300 + S.slipR*600, t, 0.08);
   // lift-off pops and crackles from high revs
   if(S.prevThr && !S.thr && rpm > C.redline*0.6){ S.crackle = 0.6 + Math.random()*0.8; flutter(0.8); }
@@ -845,6 +875,7 @@ function setCam(){ positionCamera(1, true); }
 const rpmEl = $('rpm'); for(let i = 0; i < 16; i++){ const s = document.createElement('i'); if(i >= 11) s.className = i >= 14 ? 'r' : 'y'; rpmEl.appendChild(s); }
 let hudT = 0;
 function hud(dt){
+  $('ignBtn').hidden = !(S.started && !S.paused && S.engineOn === false && !(S.intro > 0));
   if(msgT > 0){ msgT -= dt; if(msgT <= 0) $('sMsg').textContent = ''; }
   hudT -= dt; if(hudT > 0) return; hudT = 0.05;
   $('spd').textContent = S.kmh || 0;
@@ -864,6 +895,7 @@ addEventListener('keydown', e => {
   if(e.repeat) return;
   if(e.code === 'Escape'){ if(S.started) (S.paused ? resume() : pause()); }
   if(!S.started || S.paused) return;
+  if(e.code === 'KeyI' || e.code === 'Enter') coldStart();
   if(e.code === 'KeyE') shift(1);
   if(e.code === 'KeyQ') shift(-1);
   if(e.code === 'KeyM'){ S.manual = !S.manual; store.set('manual', S.manual); msg(S.manual ? 'Manual gears' : 'Automatic gears'); }
@@ -879,7 +911,8 @@ function start(){
   initAudio(); if(AC && AC.state === 'suspended') AC.resume();
   if(!S.started){ S.started = true; spawn(NET.game ? gridSlot() : 0);
     if(!NET.game){ const p = showSlot(carKey); S.x = p.x + Math.sin(p.h)*0.9; S.z = p.z + Math.cos(p.h)*0.9; S.h = p.h; S.y = hAt(S.x, S.z); }
-    S.introLen = S.intro = 2.2; S.introSide = undefined; for(const k in keys) keys[k] = false; }
+    S.introLen = S.intro = 2.2; S.introSide = undefined; for(const k in keys) keys[k] = false;
+    S.engineOn = false; S.starting = 0; S.engGain = 0; S.rpm = 0; }
   resume();
 }
 function pause(){ S.paused = true; $('menu').hidden = false; $('hud').hidden = true; $('soloBtn').textContent = NET.game ? 'Free drive' : 'Resume'; $('onlineBtn').textContent = NET.game ? 'Resume' : 'Drift online'; }
