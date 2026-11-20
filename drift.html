@@ -781,7 +781,7 @@ function engineSound(dt){
     P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol*eg*Math.sqrt(1 - mixS*mixS), t, 0.03);
   }
   A.eng.gain.setTargetAtTime((rec ? mixS : 1)*(S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol*eg, t, 0.03);
-  A.ng.gain.setTargetAtTime((0.02 + load*0.05*rpm/C.redline)*eg, t, 0.05); A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
+  A.ng.gain.setTargetAtTime(rec ? 0 : (0.02 + load*0.05*rpm/C.redline)*eg, t, 0.05);   // recorded cars bring their own intake noise A.nf.frequency.setTargetAtTime(400 + rpm*0.12, t, 0.05);
   A.tg.gain.setTargetAtTime(S.kmh > 12 ? clamp(S.slipR - 0.25, 0, 1)*0.5 : 0, t, 0.05); A.tf.frequency.setTargetAtTime(1300 + S.slipR*600, t, 0.08);
   // lift-off pops and crackles from high revs
   if(S.prevThr && !S.thr && rpm > C.redline*0.6){ S.crackle = 0.6 + Math.random()*0.8; flutter(0.8); }
@@ -792,6 +792,7 @@ function engineSound(dt){
 function pop(n, vol){
   if(!A) return;
   const t0 = AC.currentTime;
+  { const P = SAMPLES[carKey]; if(P && P.ready && !P.popBufs.length){ flame(0.12 + 0.06*n); return; } }   // recorded car without recorded pops: no synth bangs on top
   if(samplePop(vol)){ for(let k = 1; k < n; k++) setTimeout(() => samplePop(vol*0.8), k*(40 + Math.random()*60)); flame(0.12 + 0.06*n); return; }
   for(let k = 0; k < n; k++){
     const t = t0 + k*(0.03 + Math.random()*0.05);
