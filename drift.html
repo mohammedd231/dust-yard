@@ -50,7 +50,7 @@ h1{font-family:var(--display);font-weight:800;font-size:46px;line-height:.95;mar
 .btn{font:600 13px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:11px 16px;border:1px solid var(--line);background:rgba(235,236,240,.06);color:var(--fg);cursor:pointer;text-decoration:none}
 .btn:hover{background:rgba(235,236,240,.12)} .btn.primary{background:var(--accent);border-color:var(--accent);color:#120804}
 .btn:disabled{opacity:.45;cursor:default}
-.cars{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cars{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
 .cars button{all:unset;cursor:pointer;border:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:4px;background:rgba(235,236,240,.04)}
 .cars button b{font-family:var(--display);font-size:22px;font-weight:800}
 .cars button small{color:var(--muted);line-height:1.4}
@@ -82,6 +82,7 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
     <span class="lbl">Car</span>
     <div class="cars" id="cars">
       <button type="button" data-car="rx7" class="on"><b>Mazda RX-7</b><small>Tuned rotary, rear-drive. Revs to 8,500 and pops on the overrun.</small></button>
+      <button type="button" data-car="integra"><b>Acura Integra</b><small>'94 LS sedan, rear-drive swap with a VTEC four. Light and lively.</small></button>
       <button type="button" data-car="jdm"><b>JDM drift car</b><small>Rear-drive and powerful. Slides on the throttle.</small></button>
     </div>
     <span class="lbl">Your name</span>
@@ -142,6 +143,8 @@ const loadBar = () => $('loadBar').style.width = Math.round(loaded/NEED*100) + '
 const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null;
 const CARS = { rx7:{ file:'models/drift/rx7.glb', name:'Mazda RX-7', length:4.29, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null },
+               integra:{ file:'models/drift/integra.glb', name:'Acura Integra', length:4.53, drive:'rwd', power:150000, mass:1180, redline:7600, gears:[3.23, 1.9, 1.27, 0.97, 0.78], final:4.4, model:null,
+                 wheelMat:/^(rims|tire_rim|rotor|caliper|black_rims|rim_metal)$/ },
                jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null } };
 loader.load('models/drift/track.glb', g => {
   g.scene.traverse(o => { if(o.isMesh){ o.receiveShadow = true; o.castShadow = false; const ms = Array.isArray(o.material) ? o.material : [o.material];
@@ -285,21 +288,27 @@ function prepCar(C, m){
   // wheels: rotate whole wheel nodes (tyre + rim) around their own centres
   const wheels = [];
   const wheelRe = C === CARS.jdm ? /_wheel_0$/ : /^(Rims|Tyres)/;
-  const nodes = []; m.traverse(o => { if(wheelRe.test(o.name || '')) nodes.push(o); });
-  // some models keep a left+right pair in one mesh: cut those in two so each wheel can steer
+  const nodes = []; m.traverse(o => { if(C.wheelMat ? (o.isMesh && C.wheelMat.test(o.material && o.material.name || '')) : wheelRe.test(o.name || '')) nodes.push(o); });
+  // some models keep a left+right pair (or all four wheels) in one mesh: cut those apart so each wheel can steer and spin
   for(const o of [...nodes]){
     const meshes = []; o.traverse(q => { if(q.isMesh && q.geometry.index) meshes.push(q); });
-    const ob = new THREE.Box3().setFromObject(o), os = ob.getSize(new V3()); if(os.x < 1.3*os.y) continue;
-    const midX = (ob.min.x + ob.max.x)/2, sideGroups = [new THREE.Group(), new THREE.Group()], acc = [[0, 0, 0, 0], [0, 0, 0, 0]];
-    o.parent.add(sideGroups[0], sideGroups[1]); sideGroups.forEach(g => { g.position.copy(o.position); g.quaternion.copy(o.quaternion); g.scale.copy(o.scale); g.name = o.name + (g === sideGroups[0] ? '_L' : '_R'); });
+    const ob = new THREE.Box3().setFromObject(o), os = ob.getSize(new V3());
+    const cutX = os.x > 1.3*os.y, cutZ = os.z > 1.6*os.y; if(!cutX && !cutZ) continue;
+    const midX = (ob.min.x + ob.max.x)/2, midZ = (ob.min.z + ob.max.z)/2;
+    const parts = [0, 1, 2, 3].map(i => { const g = new THREE.Group(); g.position.copy(o.position); g.quaternion.copy(o.quaternion); g.scale.copy(o.scale); g.name = (o.name || 'wheel') + '_' + i; o.parent.add(g); return {g, acc:[0, 0, 0, 0]}; });
     for(const q of meshes){
-      const pa = q.geometry.attributes.position, idx = q.geometry.index.array, wv = new V3(), halves = [[], []];
-      for(let t = 0; t < idx.length; t += 3){ let cx = 0; for(let k = 0; k < 3; k++){ wv.fromBufferAttribute(pa, idx[t + k]); if(pa.normalized){ const A = pa.array, n = A instanceof Int16Array ? 32767 : A instanceof Uint16Array ? 65535 : A instanceof Int8Array ? 127 : 255; wv.divideScalar(n); } q.localToWorld(wv); cx += wv.x; } const sd = cx/3 < midX ? 0 : 1; halves[sd].push(idx[t], idx[t+1], idx[t+2]); acc[sd][0] += cx/3; acc[sd][1] += ob.getCenter(new V3()).y; acc[sd][2] += ob.getCenter(new V3()).z; acc[sd][3]++; }
+      const pa = q.geometry.attributes.position, idx = q.geometry.index.array, wv = new V3(), halves = [[], [], [], []];
+      const nrm = pa.normalized ? (pa.array instanceof Int16Array ? 32767 : pa.array instanceof Uint16Array ? 65535 : pa.array instanceof Int8Array ? 127 : 255) : 1;
+      q.updateMatrixWorld(true);
+      for(let t = 0; t < idx.length; t += 3){ let cx = 0, cy = 0, cz = 0; for(let k = 0; k < 3; k++){ wv.fromBufferAttribute(pa, idx[t + k]).divideScalar(nrm); q.localToWorld(wv); cx += wv.x; cy += wv.y; cz += wv.z; }
+        cx /= 3; cy /= 3; cz /= 3; const sd = (cutX && cx >= midX ? 1 : 0) + (cutZ && cz >= midZ ? 2 : 0);
+        halves[sd].push(idx[t], idx[t+1], idx[t+2]); const A = parts[sd].acc; A[0] += cx; A[1] += cy; A[2] += cz; A[3]++; }
       halves.forEach((h, si) => { if(!h.length) return; const g2 = new THREE.BufferGeometry(); for(const k in q.geometry.attributes) g2.setAttribute(k, q.geometry.attributes[k]); g2.setIndex(h);
-        const mm = new THREE.Mesh(g2, q.material); mm.castShadow = true; q.updateMatrixWorld(true); sideGroups[si].updateMatrixWorld(true); mm.applyMatrix4(new THREE.Matrix4().copy(sideGroups[si].matrixWorld).invert().multiply(q.matrixWorld)); sideGroups[si].add(mm); });
+        const mm = new THREE.Mesh(g2, q.material); mm.castShadow = true; parts[si].g.updateMatrixWorld(true); mm.applyMatrix4(new THREE.Matrix4().copy(parts[si].g.matrixWorld).invert().multiply(q.matrixWorld)); parts[si].g.add(mm); });
     }
-    sideGroups.forEach((g, si) => { if(acc[si][3]) g.userData.center = new V3(acc[si][0]/acc[si][3], acc[si][1]/acc[si][3], acc[si][2]/acc[si][3]); });
-    o.parent.remove(o); nodes.splice(nodes.indexOf(o), 1, ...sideGroups);
+    const keep = parts.filter(P => P.acc[3]); keep.forEach(P => { P.g.userData.center = new V3(P.acc[0]/P.acc[3], P.acc[1]/P.acc[3], P.acc[2]/P.acc[3]); });
+    parts.filter(P => !P.acc[3]).forEach(P => P.g.parent.remove(P.g));
+    o.parent.remove(o); nodes.splice(nodes.indexOf(o), 1, ...keep.map(P => P.g));
   }
   m.updateMatrixWorld(true);
   const groups = [];
@@ -389,8 +398,8 @@ function showroomCamera(t){
   // stand in front of the line-up; the car you picked rolls a little forward
   const n = SHOW.order.length, a = showSlot(SHOW.order[0]), b = showSlot(SHOW.order[n - 1]);
   const cx = (a.x + b.x)/2, cz = (a.z + b.z)/2, h = GRID.h, fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h), gy = hAt(cx, cz);
-  const wide = innerWidth > 900, shift = wide ? 2.9 : 0, sway = Math.sin(t*0.25)*0.7;
-  const want = new V3(cx + fx*9 + rx*sway, gy + 1.6, cz + fz*9 + rz*sway);
+  const wide = innerWidth > 900, shift = wide ? n*1.48 : 0, sway = Math.sin(t*0.25)*0.35;
+  const dist = 5 + n*2.9; const want = new V3(cx + fx*dist + rx*sway, gy + 1.5 + n*0.15, cz + fz*dist + rz*sway);
   const look = new V3(cx - rx*shift, gy + 0.5, cz - rz*shift);
   if(!SHOW.cam){ SHOW.cam = want.clone(); SHOW.look = look.clone(); }
   SHOW.cam.lerp(want, 0.05); SHOW.look.lerp(look, 0.05);
@@ -406,9 +415,9 @@ function introCamera(dt){
   const fx = Math.sin(S.h), fz = Math.cos(S.h);
   // swing round the open side of the car, away from the others in the line-up
   if(S.introSide === undefined){ const n = SHOW.order.length, a = showSlot(SHOW.order[0]), b = showSlot(SHOW.order[n - 1]);
-    const d = (S.x - (a.x + b.x)/2)*Math.cos(S.h) + (S.z - (a.z + b.z)/2)*(-Math.sin(S.h)); S.introSide = d >= 0 ? 1 : -1; }
+    const d = (S.x - (a.x + b.x)/2)*Math.cos(S.h) + (S.z - (a.z + b.z)/2)*(-Math.sin(S.h)); S.introSide = d >= 0 ? 1 : -1; S.introHigh = Math.abs(d) < 0.5 ? 2.6 : 0.8; }
   const ang = e*Math.PI, side = Math.sin(ang)*S.introSide;
-  const dist = lerp(7.5, 6.2, e), hgt = lerp(1.35, 2.3, e) + Math.abs(side)*0.8;
+  const dist = lerp(7.5, 6.2, e), hgt = lerp(1.35, 2.3, e) + Math.abs(side)*S.introHigh;   // a car in the middle of the line-up: arc up over its neighbour
   const rx = Math.cos(S.h), rz = -Math.sin(S.h);
   const dx = fx*Math.cos(ang) + rx*side, dz = fz*Math.cos(ang) + rz*side, l = Math.hypot(dx, dz);
   camera.position.set(S.x + dx/l*dist, S.y + hgt, S.z + dz/l*dist);
@@ -615,6 +624,7 @@ function initAudio(){
    RX-7 (13B twin rotor): 2 pulses per turn but raspy and high, the upper partials dominate, plus the rotary's 'brap' jitter. */
 const ENGINE_VOICE = {
   jdm:{ fire:3, osc:[['sawtooth', 1, 0.5], ['sawtooth', 0.5, 0.5], ['triangle', 1.5, 0.18], ['square', 2, 0.06]], lp:[320, 1900, 0.22], jitter:0.004, vol:1.05 },
+  integra:{ fire:2, osc:[['sawtooth', 1, 0.45], ['square', 2, 0.2], ['sawtooth', 0.5, 0.25], ['triangle', 3, 0.15]], lp:[600, 2700, 0.42], jitter:0.006, vol:0.95 },
   rx7:{ fire:2, osc:[['square', 2, 0.32], ['sawtooth', 3, 0.3], ['square', 4, 0.16], ['sawtooth', 1, 0.14]], lp:[900, 3800, 0.55], jitter:0.03, vol:0.85 } };
 function engineSound(dt){
   if(!A || !C) return;

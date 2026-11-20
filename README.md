@@ -28,7 +28,8 @@ W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam 
 - Jet ski rider arms: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), CC BY 4.0. Posed to hold the handlebars.
 
 ## Drift (`/drift`)
-Drift a Mazda RX-7 or a JDM drift car around Cougar Circuit, alone or with friends online. W/S throttle and brake, A/D steer, Space handbrake, E/Q shift (M for manual), C chase or cockpit camera, R back on the road.
+Drift a Mazda RX-7, an Acura Integra or a JDM drift car around Cougar Circuit, alone or with friends online. W/S throttle and brake, A/D steer, Space handbrake, E/Q shift (M for manual), R back on the road.
 - Track: "Cougar Circuit Drift Track" by HRacing (https://sketchfab.com/HRacing), CC BY-NC 4.0. Textures recompressed for the web.
 - Car: "Mazda RX-7 Tuned" by Naudaff3D (https://sketchfab.com/Naudaff3D), Sketchfab Standard licence. Textures recompressed and mesh simplified for the web.
+- Car: "1994 Acura Integra LS (DB8) \"Mia Toretto\"" by SIU Car Garage (https://sketchfab.com/Game_mode), CC BY-NC 4.0 (https://sketchfab.com/3d-models/1994-acura-integra-ls-db8-mia-toretto-0b1705f9116345f4adc05fac365ea983). Textures recompressed for the web.
 - Car: "JDM style Drift Car" by SpatialNeglect (https://sketchfab.com/jeandiz), CC BY 4.0. Textures recompressed and mesh simplified for the web.
