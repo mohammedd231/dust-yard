@@ -630,6 +630,26 @@ function updateCar(dt){
    and 15 shift lights across the top fill green, red, then blue with the revs, all
    flashing blue at the limiter. */
 const SW = { root:null, g:null, LEDS:[], sc:null, sx:null, stex:null, t:0, blink:0, dir:-1 };
+// remove triangles of the car body whose centre (in body space) passes test(x, y, z)
+function cutBody(test, skip){
+  body.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(body.matrixWorld).invert(), v = new V3(), c = new V3();
+  let removed = 0;
+  body.traverse(o => {
+    if(!o.isMesh || !o.geometry.index || (skip && skip(o))) return;
+    const pa = o.geometry.attributes.position, idx = o.geometry.index.array, m = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    const norm = !pa.normalized ? 1 : pa.array instanceof Int16Array ? 1/32767 : pa.array instanceof Uint16Array ? 1/65535 : pa.array instanceof Int8Array ? 1/127 : pa.array instanceof Uint8Array ? 1/255 : 1;
+    const keep = [];
+    for(let t = 0; t < idx.length; t += 3){
+      c.set(0, 0, 0);
+      for(let k = 0; k < 3; k++){ v.set(pa.getX(idx[t+k])*norm, pa.getY(idx[t+k])*norm, pa.getZ(idx[t+k])*norm).applyMatrix4(m); c.add(v); }
+      c.divideScalar(3);
+      if(test(c.x, c.y, c.z)) removed++; else keep.push(idx[t], idx[t+1], idx[t+2]);
+    }
+    if(keep.length !== idx.length) o.geometry.setIndex(new THREE.BufferAttribute(new (pa.count > 65535 ? Uint32Array : Uint16Array)(keep), 1));
+  });
+  return removed;
+}
 function setupWheel(){
   body.updateMatrixWorld(true);
   const parts = {}; body.traverse(o => { if(o.isMesh && o.parent && /^Object_(27|29|30|32|33)$/.test(o.parent.name)) (parts[o.parent.name] = parts[o.parent.name] || []).push(o); });
@@ -672,6 +692,13 @@ function setupWheel(){
   for(let i = 0; i < 15; i++){ const m = new THREE.MeshBasicMaterial({color:COL(i), toneMapped:false}); const L = new THREE.Mesh(lg, m); L.position.set(0.049 - i*0.007, 0.046, -0.012); L.scale.z = 0.5; g.add(L); LEDS.push({m, c:new THREE.Color(COL(i))}); }
   Object.assign(SW, {root, g, LEDS, sc, sx, stex});
   root.visible = true;
+  // the bar in front of the wheel swung round with it: drop it
+  for(const m of parts.Object_27 || []) m.visible = false;
+  const inWheel = o => { for(let q = o; q; q = q.parent) if(q === g) return true; return false; };
+  // the halo blocks the view from the cockpit, and the dashboard display stayed put behind the turning wheel
+  cutBody((x, y, z) => y > 0.78 && z > -0.45 && z < 1.25 && Math.abs(x) < 0.42, inWheel);
+  cutBody((x, y, z) => Math.abs(x) < 0.09 && y > 0.48 && y < 0.7 && z > 0.22 && z < 0.6, inWheel);
+  cutBody((x, y, z) => Math.abs(x) < 0.1 && y > 0.64 && z > 0.5 && z < 2.2, inWheel);   // the halo's front pillar
 }
 function drawWheelScreen(){
   const g = SW.sx, W = 320, H = 200;
