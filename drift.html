@@ -166,42 +166,51 @@ loadCar(carKey, () => { loaded++; loadBar(); maybeReady(); });
 function buildHeightmap(root){
   const bb = new THREE.Box3().setFromObject(root), cell = 0.5;
   const x0 = Math.floor(bb.min.x) - 2, z0 = Math.floor(bb.min.z) - 2, W = Math.ceil((bb.max.x - x0 + 2)/cell), H = Math.ceil((bb.max.z - z0 + 2)/cell);
-  const ground = new Float32Array(W*H).fill(-1e4), low = new Float32Array(W*H).fill(1e4), wall = new Float32Array(W*H).fill(-1e4);
+  const ground = new Float32Array(W*H).fill(-1e4), low = new Float32Array(W*H).fill(1e4), wall = new Uint8Array(W*H), road = new Uint8Array(W*H);
   const a = new V3(), b = new V3(), c = new V3(), e1 = new V3(), e2 = new V3(), n = new V3();
-  root.traverse(o => {
-    if(!o.isMesh) return;
+  const meshes = []; root.traverse(o => { if(o.isMesh) meshes.push(o); });
+  // pass 0: flat faces build the ground; pass 1: steep faces become walls, but only where they stand at car-body height
+  for(let pass = 0; pass < 2; pass++){ for(const o of meshes){
     const pa = o.geometry.attributes.position, idx = o.geometry.index, mw = o.matrixWorld, cnt = idx ? idx.count : pa.count;
     const norm = !pa.normalized ? 1 : pa.array instanceof Int16Array ? 1/32767 : pa.array instanceof Uint16Array ? 1/65535 : pa.array instanceof Int8Array ? 1/127 : pa.array instanceof Uint8Array ? 1/255 : 1;
-    const P = i => new V3(pa.getX(i)*norm, pa.getY(i)*norm, pa.getZ(i)*norm).applyMatrix4(mw);
+    // grass tufts, bushes and cables are drawn as crossed planes: you drive through them
+    const soft = /grass|_perilla|bush|shrub|plants|leccy|cable/i.test(o.name + ' ' + (o.parent ? o.parent.name : ''));
+    // tree branches are flat cards that hang over the tarmac edge: they only block off the road
+    const nm = o.name + ' ' + (o.parent ? o.parent.name : ''), leafy = /tree|oak/i.test(nm), isRoad = /road|kerb|slab/i.test(nm);
+    const P = (i, v) => v.set(pa.getX(i)*norm, pa.getY(i)*norm, pa.getZ(i)*norm).applyMatrix4(mw);
     for(let t = 0; t < cnt; t += 3){
-      const i0 = idx ? idx.getX(t) : t, i1 = idx ? idx.getX(t + 1) : t + 1, i2 = idx ? idx.getX(t + 2) : t + 2;
-      a.copy(P(i0)); b.copy(P(i1)); c.copy(P(i2));
+      P(idx ? idx.getX(t) : t, a); P(idx ? idx.getX(t + 1) : t + 1, b); P(idx ? idx.getX(t + 2) : t + 2, c);
       e1.subVectors(b, a); e2.subVectors(c, a); n.crossVectors(e1, e2); const L = n.length(); if(L < 1e-6) continue; n.divideScalar(L);
-      const minx = Math.min(a.x, b.x, c.x), maxx = Math.max(a.x, b.x, c.x), minz = Math.min(a.z, b.z, c.z), maxz = Math.max(a.z, b.z, c.z);
-      const ci0 = Math.max(0, Math.floor((minx - x0)/cell)), ci1 = Math.min(W - 1, Math.floor((maxx - x0)/cell)), cj0 = Math.max(0, Math.floor((minz - z0)/cell)), cj1 = Math.min(H - 1, Math.floor((maxz - z0)/cell));
-      if(Math.abs(n.y) >= 0.5){
-        // flat enough to drive on: barycentric height at each covered cell centre
+      const flat = Math.abs(n.y) >= 0.5;
+      if(pass === 0 && flat){
+        const minx = Math.min(a.x, b.x, c.x), maxx = Math.max(a.x, b.x, c.x), minz = Math.min(a.z, b.z, c.z), maxz = Math.max(a.z, b.z, c.z);
+        const ci0 = Math.max(0, Math.floor((minx - x0)/cell)), ci1 = Math.min(W - 1, Math.floor((maxx - x0)/cell)), cj0 = Math.max(0, Math.floor((minz - z0)/cell)), cj1 = Math.min(H - 1, Math.floor((maxz - z0)/cell));
         const d = (b.z - c.z)*(a.x - c.x) + (c.x - b.x)*(a.z - c.z); if(Math.abs(d) < 1e-9) continue;
         for(let j = cj0; j <= cj1; j++){ const pz = z0 + (j + 0.5)*cell;
           for(let i = ci0; i <= ci1; i++){ const px = x0 + (i + 0.5)*cell;
             const w1 = ((b.z - c.z)*(px - c.x) + (c.x - b.x)*(pz - c.z))/d, w2 = ((c.z - a.z)*(px - c.x) + (a.x - c.x)*(pz - c.z))/d, w3 = 1 - w1 - w2;
-            if(w1 < -0.02 || w2 < -0.02 || w3 < -0.02) continue;
-            const y = w1*a.y + w2*b.y + w3*c.y, k = j*W + i; if(y > ground[k]) ground[k] = y; if(y < low[k]) low[k] = y; } }
-      } else {
-        // steep: mark the cells it passes through with its top
-        const top = Math.max(a.y, b.y, c.y), steps = Math.ceil(Math.max(e1.length(), e2.length())/(cell*0.6)) + 1;
+            if(w1 < -1e-4 || w2 < -1e-4 || w3 < -1e-4) continue;   // exact: a loose test let long thin faces spill phantom steps onto the road
+            const y = w1*a.y + w2*b.y + w3*c.y, k = j*W + i; if(y > ground[k]) ground[k] = y; if(y < low[k]) low[k] = y; if(isRoad) road[k] = 1; } }
+      } else if(pass === 1 && !flat && !soft){
+        // sample the face; a cell is a wall only if the face passes 0.4-1.6 m above that cell's ground
+        // (tree canopies, cables, gantry sides and sign boards overhead don't stop the car; a low kerb face doesn't either)
+        const steps = Math.ceil(Math.max(e1.length(), e2.length())/(cell*0.6)) + 1;
         for(let u = 0; u <= steps; u++) for(let v = 0; v <= steps - u; v++){
-          const px = a.x + e1.x*u/steps + e2.x*v/steps, pz = a.z + e1.z*u/steps + e2.z*v/steps;
+          const px = a.x + e1.x*u/steps + e2.x*v/steps, pz = a.z + e1.z*u/steps + e2.z*v/steps, py = a.y + e1.y*u/steps + e2.y*v/steps;
           const i = Math.floor((px - x0)/cell), j = Math.floor((pz - z0)/cell); if(i < 0 || j < 0 || i >= W || j >= H) continue;
-          const k = j*W + i; if(top > wall[k]) wall[k] = top; }
+          const k = j*W + i, g = ground[k] > -1e3 ? ground[k] : py - 1;
+          if(py > g + 0.4 && py < g + 1.6 && !(leafy && road[k])) wall[k] = 1; }
       }
     }
-  });
-  // fill holes in the ground from neighbours so no cell drops to the void
-  for(let pass = 0; pass < 3; pass++) for(let j = 1; j < H - 1; j++) for(let i = 1; i < W - 1; i++){ const k = j*W + i; if(ground[k] > -1e3) continue;
-    let s = 0, m = 0; for(const q of [k - 1, k + 1, k - W, k + W]) if(ground[q] > -1e3){ s += ground[q]; m++; } if(m >= 2) ground[k] = s/m; }
-  // where something flat passes high overhead (the start gantry, a bridge), drive on the surface underneath
-  for(let k = 0; k < W*H; k++) if(low[k] < 1e3 && ground[k] - low[k] > 2.2) ground[k] = low[k];
+    }
+    if(pass === 0){
+      // fill holes in the ground from neighbours so no cell drops to the void
+      for(let q = 0; q < 3; q++) for(let j = 1; j < H - 1; j++) for(let i = 1; i < W - 1; i++){ const k = j*W + i; if(ground[k] > -1e3) continue;
+        let s = 0, m = 0; for(const r of [k - 1, k + 1, k - W, k + W]) if(ground[r] > -1e3){ s += ground[r]; m++; } if(m >= 2) ground[k] = s/m; }
+      // where something flat passes high overhead (the start gantry, a bridge), drive on the surface underneath
+      for(let k = 0; k < W*H; k++) if(low[k] < 1e3 && ground[k] - low[k] > 2.2) ground[k] = low[k];
+    }
+  }
   return {x0, z0, W, H, cell, ground, wall};
 }
 function hAt(x, z){
@@ -216,7 +225,7 @@ function blocked(x, z, y){
   if(i < 0 || j < 0 || i >= M.W || j >= M.H) return true;
   const k = j*M.W + i;
   if(M.ground[k] < -1e3) return true;
-  if(M.wall[k] > y + 0.35 && M.wall[k] - M.ground[k] > 0.35 && M.wall[k] < y + 30) return true;   // barrier, wall, tree
+  if(M.wall[k]) return true;                                                                            // barrier, wall, tree
   return M.ground[k] > y + 0.55;                                                                        // a step too high
 }
 
@@ -449,9 +458,18 @@ function step(dt){
   S.r = r;
   // walls: test the car's four corners
   const cfx = Math.sin(S.h), cfz = Math.cos(S.h), crx = Math.cos(S.h), crz = -Math.sin(S.h);
-  let hit = false;
-  for(const [l, w] of [[2.0, 0.8], [2.0, -0.8], [-2.0, 0.8], [-2.0, -0.8]]){ if(blocked(S.x + cfx*l + crx*w, S.z + cfz*l + crz*w, S.y)){ hit = true; break; } }
-  if(hit){ S.x = px; S.z = pz; S.vx *= -0.3; S.vz *= -0.3; S.r *= 0.3; bump(Math.hypot(S.vx, S.vz)); }
+  const hitAt = (x, z) => { for(const [l, w] of [[2.0, 0.8], [2.0, -0.8], [-2.0, 0.8], [-2.0, -0.8]]) if(blocked(x + cfx*l + crx*w, z + cfz*l + crz*w, S.y)) return true; return false; };
+  let hit = hitAt(S.x, S.z);
+  if(hit){
+    // slide along the wall instead of sticking to it: keep whichever axis is still free
+    const vIn = Math.hypot(S.vx, S.vz);
+    if(!hitAt(S.x, pz)){ S.z = pz; S.vz *= -0.3; S.vx *= 0.8; }
+    else if(!hitAt(px, S.z)){ S.x = px; S.vx *= -0.3; S.vz *= 0.8; }
+    else { S.x = px; S.z = pz; S.vx *= -0.3; S.vz *= -0.3; }
+    S.r *= 0.3; bump(vIn - Math.hypot(S.vx, S.vz));
+    // a glancing scrape isn't a crash
+    if(vIn - Math.hypot(S.vx, S.vz) < 4) hit = false;
+  }
   // ground
   const yT = hAt(S.x, S.z);
   S.y = S.y > yT + 0.4 ? S.y - dt*9 : lerp(S.y, yT, 1 - Math.exp(-dt*20));
