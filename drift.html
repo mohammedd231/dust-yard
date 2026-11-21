@@ -695,8 +695,8 @@ function initAudio(){
    as the fallback while they load (or if they fail). */
 const SAMPLES = {
   jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8, 0.55]], pops:4, flutter:true, coldstart:true, vol:1.25 },
-  // RX-7: the brap-brap idle, then one 4-rotor turbo recording for everything above it - revs, anti-lag and bangs - so it stays one engine
-  rx7:{ dir:'sounds/rx7/', prefix:'rx7_', loops:[['idle', 950, 0, 2300], ['rev', 3000, 1500, 99999, 900], ['antilag', 8300, 8150, 9999, 300, 1.6, 0.5]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
+  // RX-7: the brap-brap idle, a 13B throttle pull for the revs, and 4-rotor anti-lag and bangs at the top
+  rx7:{ dir:'sounds/rx7/', prefix:'rx7_', loops:[['idle', 950, 0, 2300], ['throttle', 2800, 1500, 99999, 900], ['antilag', 8300, 8150, 9999, 300, 1.6, 0.5]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
 };
 function loadSamples(){
   for(const key in SAMPLES){
