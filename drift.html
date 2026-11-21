@@ -65,6 +65,8 @@ h1{font-family:var(--display);font-weight:800;font-size:46px;line-height:.95;mar
 .cars button small{color:var(--muted);line-height:1.4}
 .cars button.on{border-color:var(--accent);background:rgba(255,90,31,.12)}
 .cars button[hidden]{display:none}
+.build{margin-top:10px;font:600 10px/1 system-ui,sans-serif;letter-spacing:.08em;color:var(--muted);opacity:.6}
+.upd{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:9;padding:10px 18px;border-radius:999px;border:1px solid var(--accent);background:rgba(18,10,8,.9);color:#fff;font:700 13px/1 system-ui,sans-serif;cursor:pointer}
 .sets{display:flex;gap:6px;margin:0 0 8px}
 .sets button{all:unset;cursor:pointer;padding:6px 14px;border:1px solid var(--line);font:700 12px/1 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .sets button.on{border-color:var(--accent);color:#fff;background:rgba(255,90,31,.12)}
@@ -109,6 +111,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <div class="row"><input id="nick" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Your name"></div>
     <div class="row"><button id="onlineBtn" class="btn primary" type="button" disabled>Drift online</button><button id="soloBtn" class="btn" type="button" disabled>Free drive</button><a class="btn" href="./">Back to Dust Yard</a></div>
     <div class="races" id="races"></div>
+    <div class="build" id="build"></div>
     <div class="row" id="inviteRow" hidden><input id="inviteLink" readonly aria-label="Invite link"><button id="copyBtn" class="btn" type="button">Copy invite</button></div>
     <div class="load"><i id="loadBar"></i></div>
     <p class="status" id="status">Loading the circuit…</p>
@@ -132,6 +135,12 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
 const $ = id => document.getElementById(id);
 const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, t) => a + (b - a)*t;
 const now = () => performance.now()/1000;
+/* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
+   (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
+const BUILD = '2026-11-21.3';
+{ const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
+  const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
+  setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
 const store = { get(k, d){ try{ const v = localStorage.getItem('dydrift.' + k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } }, set(k, v){ try{ localStorage.setItem('dydrift.' + k, JSON.stringify(v)); }catch(e){} } };
 
 /* ---------- renderer & scene ---------- */
