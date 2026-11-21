@@ -89,7 +89,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
   <div class="board" id="board"><div class="lbl" id="boardHd">Drift score</div><ol id="boardList"></ol></div>
   <div class="dash"><div><span class="spd" id="spd">0</span> <span class="lbl">km/h</span></div><div class="gear" id="gear">N</div><div class="rpm" id="rpm"></div></div>
 </div>
-<button id="ignBtn" class="ign" type="button" hidden>Cold start<small>Press I or Enter</small></button>
+<button id="ignBtn" class="ign" type="button" hidden>Cold start<small>Press I or Enter · then hold Enter to rev</small></button>
 <div id="menu">
   <div class="card">
     <div class="eyebrow">Dust Yard · Cougar Circuit</div>
@@ -655,6 +655,7 @@ function step(dt){
   const st = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0);
   if(S.paused){ thr = brk = 0; hb = 1; }
   if(S.engineOn === false) thr = 0;   // cold start first
+  const freeRev = S.rev && S.engineOn !== false && !S.paused; if(freeRev) thr = 0;   // revving in neutral: the car stays put
   const fx = Math.sin(S.h), fz = Math.cos(S.h), yx = Math.cos(S.h), yz = -Math.sin(S.h);
   let vx = S.vx*fx + S.vz*fz, vy = S.vx*yx + S.vz*yz, r = S.r;
   const sp = Math.abs(vx);
@@ -690,6 +691,11 @@ function step(dt){
   // cold idle: right after it catches the engine flares, then settles smoothly down to its normal idle
   if(S.coldT !== undefined){ S.coldT += dt; const t = S.coldT, f = t < 1.1 ? S.coldFrom + (S.coldPeak - S.coldFrom)*Math.sin(t/1.1*Math.PI/2) : 900 + (S.coldPeak - 900)*Math.exp(-(t - 1.1)/1.4);
     if(!thr) S.rpm = Math.max(S.rpm, f); if(t > 9) S.coldT = undefined; }
+  // flexing in neutral (hold Enter / Rev): the revs fly up to the limiter and bounce on it with the anti-lag, then fall back when you let go
+  if(freeRev){ S.free = Math.max(S.free || S.rpm, S.rpm) + dt*(S.free > C.redline*0.7 ? 9000 : 14000);
+    if(S.free >= C.redline + 120) S.free = C.redline - 250 - Math.random()*200;
+    S.rpm = Math.max(S.rpm, Math.min(S.free, C.redline + 120)); S.coldT = undefined; }
+  else if(S.free){ S.free -= dt*6500; if(S.free <= S.rpm) S.free = 0; else S.rpm = S.free; }
   // loads and tyre forces
   const m = C.mass, Lw = C.wheelbase || 2.5, a = Lw*0.48, b = Lw*0.52, Iz = m*1.45;
   const Fz = m*9.81, dW = m*S.ax*0.5/Lw;
@@ -795,7 +801,7 @@ function step(dt){
     if(hit){ S.drift = 0; S.combo = 1; S.driftT = 0; msg('Crashed', '#ff3b2f'); }
     else if(S.idleT > 1.2){ bank(); }
   }
-  S.thr = thr; S.brk = brk; S.hb = hb;
+  S.thr = thr || (freeRev ? 1 : 0); S.brk = brk; S.hb = hb;
 }
 function bank(){
   const pts = Math.round(S.drift);
@@ -1105,13 +1111,14 @@ addEventListener('keydown', e => {
   if(e.repeat) return;
   if(e.code === 'Escape'){ if(S.started) (S.paused ? resume() : pause()); }
   if(!S.started || S.paused) return;
-  if(e.code === 'KeyI' || e.code === 'Enter') coldStart();
+  if(e.code === 'Enter' && S.engineOn !== false && !S.starting) S.rev = true;   // engine running: Enter revs it in neutral
+  else if(e.code === 'KeyI' || e.code === 'Enter') coldStart();
   if(e.code === 'KeyE') shift(1);
   if(e.code === 'KeyQ') shift(-1);
   if(e.code === 'KeyM'){ S.manual = !S.manual; store.set('manual', S.manual); msg(S.manual ? 'Manual gears' : 'Automatic gears'); }
   if(e.code === 'KeyR'){ const n = nearestRoad(S.x, S.z); S.x = n.x; S.z = n.z; S.vx = S.vz = S.r = 0; S.y = hAt(S.x, S.z); S.drift = 0; msg('Back on the road'); }
 });
-addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('keyup', e => { keys[e.code] = false; if(e.code === 'Enter') S.rev = false; });
 addEventListener('blur', () => { for(const k in keys) keys[k] = false; });
 function nearestRoad(x, z){
   // the last place we were driving cleanly
@@ -1308,7 +1315,8 @@ if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ look:(dx, dy) => lookBy(dx*1.3, d
   { label:'Brake', x:'r1', y:'b0', size:'md', wide:true, code:'KeyS' },
   { label:'II', x:'r0', y:'t0', size:'sm', code:'Escape' },
   { label:'Hand brake', x:'r0.04', y:'b1.3', size:'md', code:'Space', buzz:true },
-  { label:'Reset', x:'l0', y:'t0', size:'sm', code:'KeyR' }
+  { label:'Reset', x:'l0', y:'t0', size:'sm', code:'KeyR' },
+  { label:'Rev', x:'r1.08', y:'b1.3', size:'md', code:'Enter', buzz:true }
 ] });
 })();
 </script>
