@@ -211,7 +211,7 @@ const body = new THREE.Group(); car.add(body);
 const shadowBlob = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 5.8), new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.45, depthWrite:false}));
 shadowBlob.rotation.x = -Math.PI/2; shadowBlob.renderOrder = 1;
 const CAMS = [
-  {name:'Cockpit', pos:new V3(0, 0.78, 0.74), look:new V3(0, 0.68, 30), fov:72},
+  {name:'Cockpit', pos:new V3(0, 0.96, -0.1), look:new V3(0, -4.2, 30), fov:72},   // driver's eyes, a little high so you see the track
   {name:'T-cam',   pos:new V3(0, 1.28, -0.35), look:new V3(0, 0.6, 22), fov:68},
   {name:'Chase',   pos:new V3(0, 2.4, -7.6),   look:new V3(0, 0.9, 6),   fov:64}
 ];
@@ -310,7 +310,9 @@ loader.load('models/f1/car.glb', g => {
   wheelR = 11.4 * s;
   // the model's nose points to -Z; turn it around so the nose leads (+Z)
   const wrap = new THREE.Group(); wrap.rotation.y = Math.PI; wrap.add(m);
-  body.add(wrap); progress();
+  body.add(wrap);
+  try { setupWheel(); } catch(e){ console.warn('wheel', e); }
+  progress();
 }, undefined, () => fail('car'));
 
 /* ---------- state ---------- */
@@ -629,6 +631,251 @@ function updateCar(dt){
   sky.position.copy(camera.position);
 }
 
+/* ---------- steering wheel (cockpit view) ----------
+   The car model has its own F1 wheel. Bring it to life: it turns with your steering,
+   gets carbon and rubber instead of plain white, its screen shows gear, speed and lap,
+   and 15 shift lights across the top fill green, red, then blue with the revs, all
+   flashing blue at the limiter. */
+const SW = { root:null, g:null, LEDS:[], sc:null, sx:null, stex:null, t:0, blink:0, dir:-1 };
+// remove triangles of the car body whose centre (in body space) passes test(x, y, z)
+function cutBody(test, skip){
+  body.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(body.matrixWorld).invert(), v = new V3(), c = new V3(), T3 = [new V3(), new V3(), new V3()];
+  let removed = 0;
+  body.traverse(o => {
+    if(!o.isMesh || !o.geometry.index || (skip && skip(o))) return;
+    const pa = o.geometry.attributes.position, idx = o.geometry.index.array, m = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    const norm = !pa.normalized ? 1 : pa.array instanceof Int16Array ? 1/32767 : pa.array instanceof Uint16Array ? 1/65535 : pa.array instanceof Int8Array ? 1/127 : pa.array instanceof Uint8Array ? 1/255 : 1;
+    const keep = [];
+    for(let t = 0; t < idx.length; t += 3){
+      c.set(0, 0, 0);
+      for(let k = 0; k < 3; k++){ v.set(pa.getX(idx[t+k])*norm, pa.getY(idx[t+k])*norm, pa.getZ(idx[t+k])*norm).applyMatrix4(m); c.add(v); T3[k].copy(v); }
+      c.divideScalar(3);
+      const nrm = T3[1].sub(T3[0]).cross(T3[2].sub(T3[0])).normalize();
+      if(test(c.x, c.y, c.z, nrm)) removed++; else keep.push(idx[t], idx[t+1], idx[t+2]);
+    }
+    if(keep.length !== idx.length) o.geometry.setIndex(new THREE.BufferAttribute(new (pa.count > 65535 ? Uint32Array : Uint16Array)(keep), 1));
+  });
+  return removed;
+}
+// connected pieces of the body (triangles sharing vertices), with their body-space bounds
+function bodyPieces(skip){
+  body.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(body.matrixWorld).invert(), v = new V3(), out = [];
+  body.traverse(o => {
+    if(!o.isMesh || !o.geometry.index || (skip && skip(o))) return;
+    const pa = o.geometry.attributes.position, idx = o.geometry.index.array, m = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    const norm = !pa.normalized ? 1 : pa.array instanceof Int16Array ? 1/32767 : pa.array instanceof Uint16Array ? 1/65535 : pa.array instanceof Int8Array ? 1/127 : pa.array instanceof Uint8Array ? 1/255 : 1;
+    // union-find over vertices; vertices at the same position count as joined
+    const par = new Int32Array(pa.count).map((_, i) => i), find = a => { while(par[a] !== a){ par[a] = par[par[a]]; a = par[a]; } return a; };
+    const key = new Map();
+    for(let i = 0; i < pa.count; i++){ const k = Math.round(pa.getX(i)*norm*1e4) + ',' + Math.round(pa.getY(i)*norm*1e4) + ',' + Math.round(pa.getZ(i)*norm*1e4); if(key.has(k)) par[find(i)] = find(key.get(k)); else key.set(k, i); }
+    for(let t = 0; t < idx.length; t += 3){ const a = find(idx[t]); par[find(idx[t+1])] = a; par[find(idx[t+2])] = a; }
+    const comp = new Map();
+    for(let t = 0; t < idx.length; t += 3){
+      const r = find(idx[t]); let c = comp.get(r); if(!c){ c = {mesh:o, tris:[], min:new V3(1e9, 1e9, 1e9), max:new V3(-1e9, -1e9, -1e9)}; comp.set(r, c); }
+      c.tris.push(t);
+      for(let k = 0; k < 3; k++){ v.set(pa.getX(idx[t+k])*norm, pa.getY(idx[t+k])*norm, pa.getZ(idx[t+k])*norm).applyMatrix4(m); c.min.min(v); c.max.max(v); }
+    }
+    out.push(...comp.values());
+  });
+  return out;
+}
+function dropPieces(pieces){
+  const by = new Map(); for(const p of pieces){ if(!by.has(p.mesh)) by.set(p.mesh, new Set()); for(const t of p.tris) by.get(p.mesh).add(t); }
+  for(const [o, drop] of by){ const idx = o.geometry.index.array, keep = []; for(let t = 0; t < idx.length; t += 3) if(!drop.has(t)) keep.push(idx[t], idx[t+1], idx[t+2]);
+    o.geometry.setIndex(new THREE.BufferAttribute(new (o.geometry.attributes.position.count > 65535 ? Uint32Array : Uint16Array)(keep), 1)); }
+}
+function setupWheel(){
+  body.updateMatrixWorld(true);
+  const parts = {}; body.traverse(o => { if(o.isMesh && o.parent && /^Object_(27|29|30|32|33)$/.test(o.parent.name)) (parts[o.parent.name] = parts[o.parent.name] || []).push(o); });
+  const face = parts.Object_30 && parts.Object_30[0]; if(!face) return;
+  const inv = new THREE.Matrix4().copy(body.matrixWorld).invert();
+  // wheel face in body space: centre and plane (PCA: the least-spread direction is the normal)
+  const pa = face.geometry.attributes.position, pts = [], v = new V3(), toBody = new THREE.Matrix4().multiplyMatrices(inv, face.matrixWorld);
+  const norm = !pa.normalized ? 1 : pa.array instanceof Int16Array ? 1/32767 : pa.array instanceof Uint16Array ? 1/65535 : pa.array instanceof Int8Array ? 1/127 : pa.array instanceof Uint8Array ? 1/255 : 1;
+  for(let i = 0; i < pa.count; i++){ v.set(pa.getX(i)*norm, pa.getY(i)*norm, pa.getZ(i)*norm).applyMatrix4(toBody); pts.push(v.clone()); }
+  const c = pts.reduce((a, p) => a.add(p), new V3()).divideScalar(pts.length);
+  const C = [[0,0,0],[0,0,0],[0,0,0]];
+  for(const p of pts){ const d = [p.x - c.x, p.y - c.y, p.z - c.z]; for(let i = 0; i < 3; i++) for(let j = 0; j < 3; j++) C[i][j] += d[i]*d[j]; }
+  // smallest eigenvector by inverse power iteration on (C + eps I)
+  const M = new THREE.Matrix3().set(C[0][0] + 1e-6, C[0][1], C[0][2], C[1][0], C[1][1] + 1e-6, C[1][2], C[2][0], C[2][1], C[2][2] + 1e-6), Mi = new THREE.Matrix3().copy(M).invert();
+  let n = new V3(0.1, 0.3, -1).normalize(); for(let k = 0; k < 30; k++) n.applyMatrix3(Mi).normalize();
+  if(n.z > 0) n.negate();                                                  // face toward the driver (behind, -Z)
+  const up = new V3(0, 1, 0).sub(n.clone().multiplyScalar(n.y)).normalize(), right = new V3().crossVectors(up, n).normalize();
+  // pivot on the wheel's centre, axis along the steering column
+  const root = new THREE.Group(); root.position.copy(c);
+  root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n.clone().negate()));
+  body.add(root); root.updateMatrixWorld(true);
+  const g = new THREE.Group(); root.add(g); g.updateMatrixWorld(true);
+  for(const k in parts) for(const m of parts[k]) g.attach(m);
+  // materials: carbon body, rubber grips, light grey details
+  const cc = document.createElement('canvas'); cc.width = cc.height = 64; const cx = cc.getContext('2d');
+  for(let y = 0; y < 64; y += 8) for(let x = 0; x < 64; x += 8){ const on = ((x + y)/8) % 2; cx.fillStyle = on ? '#25272b' : '#1a1b1e'; cx.fillRect(x, y, 8, 8); cx.fillStyle = 'rgba(255,255,255,.06)'; cx.fillRect(x + (on ? 1 : 0), y + 1, on ? 6 : 1, on ? 1 : 6); }
+  const ct = new THREE.CanvasTexture(cc); ct.wrapS = ct.wrapT = THREE.RepeatWrapping; ct.repeat.set(8, 8);
+  const carbon = new THREE.MeshStandardMaterial({map:ct, color:0x6a6c70, roughness:0.32, metalness:0.3});
+  const rubber = new THREE.MeshStandardMaterial({color:0x202022, roughness:0.95});
+  const detail = new THREE.MeshStandardMaterial({color:0x9aa0a8, roughness:0.5, metalness:0.5});
+  const accent = new THREE.MeshStandardMaterial({color:0xd8dadf, roughness:0.45});
+  const mats = {Object_30:carbon, Object_27:rubber, Object_29:detail, Object_32:detail, Object_33:accent};
+  for(const k in parts) for(const m of parts[k]){ m.material = mats[k]; m.castShadow = false; }
+  // screen over the wheel's display, and the shift lights above it (wheel-local: x right, y up, -z toward driver)
+  const sc = document.createElement('canvas'); sc.width = 320; sc.height = 200; const sx = sc.getContext('2d');
+  const stex = new THREE.CanvasTexture(sc);
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.084, 0.053), new THREE.MeshBasicMaterial({map:stex, toneMapped:false}));
+  scr.position.set(0, 0.012, -0.012); scr.rotation.y = Math.PI; g.add(scr);
+  const LEDS = [], lg = new THREE.SphereGeometry(0.0034, 10, 8), COL = i => i < 5 ? 0x22e05a : i < 10 ? 0xff2a1a : 0x2a6bff;
+  for(let i = 0; i < 15; i++){ const m = new THREE.MeshBasicMaterial({color:COL(i), toneMapped:false}); const L = new THREE.Mesh(lg, m); L.position.set(0.049 - i*0.007, 0.046, -0.012); L.scale.z = 0.5; g.add(L); LEDS.push({m, c:new THREE.Color(COL(i))}); }
+  Object.assign(SW, {root, g, LEDS, sc, sx, stex});
+  try { dressWheel(g); } catch(e){ console.warn('wheel buttons', e); }
+  try { setupMirrors(); } catch(e){ console.warn('mirrors', e); }
+  root.visible = true;
+  // the bar in front of the wheel swung round with it: drop it
+  for(const m of parts.Object_27 || []) m.visible = false;
+  const inWheel = o => { for(let q = o; q; q = q.parent) if(q === g) return true; return false; };
+  // the halo blocks the view from the cockpit, and the dashboard display stayed put behind the turning wheel
+  if(window.__nocut) return;
+  // the halo hoop sits well above the cockpit rim: take only what's above it, so the sides stay whole
+  cutBody((x, y, z) => y > 0.78 && z > -0.45 && z < 1.25 && Math.abs(x) < 0.42, inWheel);
+  cutBody((x, y, z) => Math.abs(x) < 0.09 && y > 0.48 && y < 0.7 && z > 0.22 && z < 0.6, inWheel);
+  // its front pillar: a narrow upright strip on the nose; keep the nose's own (upward-facing) skin
+  cutBody((x, y, z, n) => Math.abs(x) < 0.07 && y > 0.66 && z > 0.55 && z < 1.3 && Math.abs(n.y) < 0.75, inWheel);
+  dropPieces(bodyPieces(inWheel).filter(p => (p.max.x - p.min.x) < 0.05 && p.min.y > 0.6 && p.min.z > 0.7 && p.max.z < 1.1));   // its thin trim pieces   // the halo's front pillar
+}
+// Buttons, rotaries and thumbwheels like a real F1 wheel (wheel-local: +x is the driver's left, -z faces the driver)
+function dressWheel(g){
+  const X = x => -x, Z = -0.016;                                 // write positions as the driver sees them
+  const lbl = (txt, bg, fg) => { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+    x.fillStyle = bg; x.beginPath(); x.arc(64, 64, 62, 0, 7); x.fill();
+    const gr = x.createRadialGradient(46, 40, 4, 64, 64, 64); gr.addColorStop(0, 'rgba(255,255,255,.45)'); gr.addColorStop(0.5, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(0,0,0,.35)'); x.fillStyle = gr; x.fill();
+    if(txt){ x.fillStyle = fg || '#fff'; x.font = `800 ${txt.length > 2 ? 40 : 54}px "Saira Condensed", Arial, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(txt, 64, 68); }
+    const t = new THREE.CanvasTexture(c); t.center.set(0.5, 0.5); t.rotation = Math.PI; return t; };
+  const button = (x, y, r, bg, txt, fg) => {
+    const side = new THREE.MeshStandardMaterial({color:bg, roughness:0.45}), top = new THREE.MeshStandardMaterial({map:lbl(txt, bg, fg), roughness:0.35, emissive:0xffffff, emissiveIntensity:0.08, emissiveMap:null});
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r*1.04, 0.007, 20), [side, top, side]);
+    m.rotation.x = -Math.PI/2; m.position.set(X(x), y, Z); g.add(m);
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(r*1.32, r*1.32, 0.003, 20), new THREE.MeshStandardMaterial({color:0x0b0b0c, roughness:0.6})); rim.rotation.x = -Math.PI/2; rim.position.set(X(x), y, Z + 0.003); g.add(rim);
+  };
+  const ring = (x, y, R, cols) => {
+    // a rotary: a printed ring of numbered positions around a coloured knob
+    const c = document.createElement('canvas'); c.width = c.height = 256; const q = c.getContext('2d');
+    q.fillStyle = '#0d0e10'; q.beginPath(); q.arc(128, 128, 126, 0, 7); q.fill();
+    for(let i = 0; i < 16; i++){ const a0 = -Math.PI/2 + i/16*Math.PI*2, a1 = a0 + Math.PI*2/16; q.fillStyle = cols[i % cols.length]; q.beginPath(); q.moveTo(128, 128); q.arc(128, 128, 124, a0 + 0.02, a1 - 0.02); q.closePath(); q.fill();
+      q.save(); q.translate(128 + Math.cos(a0 + Math.PI/16)*100, 128 + Math.sin(a0 + Math.PI/16)*100); q.rotate(Math.PI); q.fillStyle = '#111'; q.font = '800 30px "Saira Condensed", Arial'; q.textAlign = 'center'; q.textBaseline = 'middle'; q.fillText(String(i + 1), 0, 0); q.restore(); }
+    q.fillStyle = '#0d0e10'; q.beginPath(); q.arc(128, 128, 72, 0, 7); q.fill();
+    const t = new THREE.CanvasTexture(c);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(R, 32), new THREE.MeshStandardMaterial({map:t, roughness:0.5}));
+    disc.rotation.y = Math.PI; disc.position.set(X(x), y, Z + 0.0015); g.add(disc);
+    const knobCol = cols[0];
+    const k = new THREE.Mesh(new THREE.CylinderGeometry(R*0.5, R*0.56, 0.011, 9), new THREE.MeshStandardMaterial({color:knobCol, roughness:0.35, metalness:0.15}));
+    k.rotation.x = -Math.PI/2; k.position.set(X(x), y, Z - 0.004); g.add(k);
+    const ptr = new THREE.Mesh(new THREE.BoxGeometry(0.0018, R*0.42, 0.002), new THREE.MeshBasicMaterial({color:0xffffff})); ptr.position.set(X(x), y + R*0.22, Z - 0.0102); g.add(ptr);
+  };
+  const thumb = (x, y, col, ang) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.0075, 0.0075, 0.016, 16), new THREE.MeshStandardMaterial({color:col, roughness:0.3, metalness:0.55}));
+    m.rotation.z = Math.PI/2 + (ang || 0); m.position.set(X(x), y, Z + 0.002); g.add(m);
+  };
+  // top row
+  button(-0.090, 0.050, 0.0078, '#f4dd1a', 'DRS', '#1b1b1b'); button(-0.068, 0.046, 0.0072, '#6c3bd6', '+10'); button(-0.062, 0.027, 0.0072, '#1fc8b0', 'N', '#10201d');
+  button( 0.090, 0.050, 0.0078, '#1f8cf0', 'OT');              button( 0.068, 0.046, 0.0072, '#6c3bd6', '+1');  button( 0.062, 0.027, 0.0072, '#f4dd1a', 'PL', '#1b1b1b');
+  // sides
+  button(-0.064, -0.012, 0.0072, '#f07418', 'DR');   button(-0.064, -0.034, 0.0072, '#e2251f', '✕');
+  button( 0.064, -0.012, 0.0072, '#e8e9ec', 'PC', '#555'); button( 0.064, -0.034, 0.0072, '#1ec26a', 'R');
+  button(-0.074, -0.058, 0.0066, '#18191b', 'BB-', '#ddd'); button( 0.074, -0.058, 0.0066, '#18191b', 'BB+', '#ddd');
+  // rotaries
+  ring(-0.034, -0.058, 0.0155, ['#f4dd1a', '#2a8cff', '#f07418', '#e9e9e9']);
+  ring( 0.000, -0.060, 0.0165, ['#7a3be0', '#e2251f', '#1ec26a', '#f4dd1a']);
+  ring( 0.034, -0.058, 0.0155, ['#2fd6b4', '#e2251f', '#f4dd1a', '#e9e9e9']);
+  // thumbwheels
+  thumb(-0.100, 0.030, 0xd8261c, 0.5); thumb(0.100, 0.030, 0x1f6fe0, -0.5);
+  thumb(-0.078, 0.004, 0xd9a02a); thumb(0.078, 0.004, 0xd9a02a);
+}
+
+// Working mirrors: each glass shows what's behind, rendered from the mirror itself
+let MIR = null;
+function setupMirrors(){
+  const rt = new THREE.WebGLRenderTarget(640, 128, {depthBuffer:true});
+  const glass = [];
+  for(const sd of [1, -1]){                                        // body +x is the driver's left
+    const n = new V3(-0.32*sd, 0, -0.95).normalize();               // glass faces back toward the driver
+    const c = new V3(0.585*sd, 0.726, 0.372).addScaledVector(n, 0.004);
+    const geo = new THREE.PlaneGeometry(0.17, 0.062);
+    // left mirror uses the left half of the image, right the right half; flipped like a mirror
+    const uv = geo.attributes.uv; const u0 = sd > 0 ? 0 : 0.5;
+    for(let i = 0; i < uv.count; i++) uv.setX(i, u0 + (1 - uv.getX(i))*0.5);
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({map:rt.texture, toneMapped:false}));
+    m.position.copy(c); m.lookAt(c.clone().add(n)); body.add(m);
+    const cam = new THREE.PerspectiveCamera(15, (640/2)/128, 0.05, 300);
+    glass.push({m, cam, c, n, sd});
+  }
+  MIR = {rt, glass, frame:0};
+}
+const _mv = new V3(), _me = new V3(), _mw = new V3();
+function mirrorsTick(){
+  if(!MIR) return;
+  const on = camMode === 0 && S.started;
+  for(const G of MIR.glass) G.m.visible = on;
+  if(!on) return;
+  MIR.frame = (MIR.frame + 1) % 2; if(MIR.frame) return;            // every other frame is plenty
+  const auto = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
+  for(const G of MIR.glass) G.m.visible = false;
+  camera.getWorldPosition(_me);
+  for(const G of MIR.glass){
+    // look along the eye's line reflected in the glass
+    _mw.copy(G.c); body.localToWorld(_mw);
+    const nW = G.n.clone().transformDirection(body.matrixWorld);
+    _mv.copy(_mw).sub(_me).normalize(); _mv.addScaledVector(nW, -2*_mv.dot(nW));
+    _mv.y += 0.09; _mv.normalize();                                // angled up a touch, like a driver sets them: more track, less sidepod
+    G.cam.position.copy(_mw); G.cam.up.set(0, 1, 0); G.cam.lookAt(_mw.clone().add(_mv)); G.cam.updateMatrixWorld(true);
+    const x0 = G.sd > 0 ? 0 : 320;
+    MIR.rt.viewport.set(x0, 0, 320, 128); MIR.rt.scissor.set(x0, 0, 320, 128); MIR.rt.scissorTest = true;
+    renderer.setRenderTarget(MIR.rt); renderer.render(scene, G.cam);
+  }
+  renderer.setRenderTarget(null);
+  for(const G of MIR.glass) G.m.visible = true;
+  renderer.shadowMap.autoUpdate = auto;
+}
+
+function drawWheelScreen(){
+  const g = SW.sx, W = 320, H = 200;
+  g.fillStyle = '#05070a'; g.fillRect(0, 0, W, H);
+  // top strip: lap and delta
+  const lapT = S.lap && S.running ? now() - S.lapStart : 0;
+  g.fillStyle = '#0f141b'; g.fillRect(0, 0, W, 34);
+  g.font = '700 22px "JetBrains Mono", monospace'; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#9aa4b0';
+  g.fillText(S.lap ? 'L' + S.lap : 'OUT', 10, 18);
+  g.textAlign = 'right'; g.fillStyle = '#eef1f5'; g.fillText(S.lap ? fmt(lapT) : '--:--.---', W - 10, 18);
+  // gear, big
+  g.textAlign = 'center'; g.font = '800 104px "Saira Condensed", "Arial Narrow", sans-serif';
+  const lim = (S.rpm || 0) > 11600;
+  g.fillStyle = lim ? (SW.blink > 0.5 ? '#2a6bff' : '#eef1f5') : '#eef1f5'; g.fillText(S.gearTxt || 'N', W/2, 108);
+  // speed and best
+  g.font = '700 30px "JetBrains Mono", monospace'; g.fillStyle = '#eef1f5'; g.textAlign = 'left'; g.fillText(String(S.kmh || 0), 14, 82);
+  g.font = '600 14px "JetBrains Mono", monospace'; g.fillStyle = '#7d8794'; g.fillText('KM/H', 16, 108);
+  g.textAlign = 'right'; g.font = '600 14px "JetBrains Mono", monospace'; g.fillText('BEST', W - 14, 64);
+  g.font = '700 20px "JetBrains Mono", monospace'; g.fillStyle = '#c87cff'; g.fillText(isFinite(S.best) ? fmt(S.best) : '--', W - 12, 88);
+  // bottom: tyre temps and ERS / brake bars
+  const bar = (x, y, w, f, col, label) => { g.fillStyle = '#18202a'; g.fillRect(x, y, w, 12); g.fillStyle = col; g.fillRect(x, y, w*clamp(f, 0, 1), 12); g.fillStyle = '#7d8794'; g.font = '600 12px "JetBrains Mono", monospace'; g.textAlign = 'left'; g.fillText(label, x, y - 9); };
+  bar(12, 152, 130, S.throttle ? 1 : 0.05, '#22e05a', 'THR');
+  bar(178, 152, 130, S.brake ? 1 : 0.0, '#ff2a1a', 'BRK');
+  g.fillStyle = '#7d8794'; g.font = '600 12px "JetBrains Mono", monospace'; g.textAlign = 'center';
+  g.fillText('ERS ' + Math.round(70 + 25*Math.sin(now()*0.07)) + '%   BB 56.5', W/2, 180);
+  SW.stex.needsUpdate = true;
+}
+function wheelTick(dt){
+  if(!SW.g) return;
+  // F1 lock is about +-110 degrees of wheel for the full front-wheel angle
+  SW.g.rotation.z = clamp(S.steer*4.8, -1.9, 1.9)*SW.dir;
+  const f = clamp(((S.rpm || 0) - 7600)/4100, 0, 1), lit = Math.round(f*15);
+  SW.blink = (SW.blink + dt*9) % 1;
+  const limiter = (S.rpm || 0) > 11600;
+  SW.LEDS.forEach((L, i) => {
+    if(limiter){ L.m.color.set(SW.blink > 0.5 ? 0x2a6bff : 0x05070a); }
+    else L.m.color.copy(L.c).multiplyScalar(i < lit ? 1 : 0.08);
+  });
+  SW.t -= dt; if(SW.t <= 0 && camMode === 0){ SW.t = 1/20; drawWheelScreen(); }
+}
+
 /* ---------- camera ---------- */
 const camPos = new V3(), camLook = new V3();
 function positionCamera(dt, snap){
@@ -674,6 +921,8 @@ function updateHUD(dt){
   const lo = GEARS[g-1], hi = GEARS[g], frac = clamp((vf - lo*0.55)/(hi - lo*0.55), 0, 1);
   const rpm = vf < 0 ? 5000 : 4200 + frac*7800 + (S.throttle && vf < 3 ? 3000 : 0);
   engineSound(rpm, S.throttle, speed);
+  S.rpm = rpm; S.gearTxt = vf < -0.5 ? 'R' : (speed < 0.5 && !S.throttle) ? 'N' : String(g); S.kmh = Math.round(speed*3.6);
+  wheelTick(dt);
   hudT -= dt; if(hudT > 0) return; hudT = 0.05;
   $('spd').textContent = kmh;
   $('gear').textContent = vf < -0.5 ? 'R' : (speed < 0.5 && !S.throttle) ? 'N' : g;
@@ -896,6 +1145,7 @@ function frame(){
     if(S.started) positionCamera(dt, false);
   }
   flashT = Math.max(0, flashT - dt); $('flash').style.opacity = Math.min(1, flashT*2);
+  mirrorsTick();
   renderer.render(scene, camera);
 }
 setCam(camMode);
