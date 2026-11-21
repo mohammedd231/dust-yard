@@ -97,6 +97,8 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <div class="eyebrow">Dust Yard · Cougar Circuit</div>
     <h1>Drift</h1>
     <p class="lede">Pick a car, hold Space to pull the handbrake into the corner, and keep it sideways on the throttle. Angle and speed score points; friends can join the same session.</p>
+    <span class="lbl">Time</span>
+    <div class="sets" id="tod"><button type="button" data-tod="day" class="on">Day</button><button type="button" data-tod="night">Night</button></div>
     <span class="lbl">Car</span>
     <div class="sets" id="sets"><button type="button" data-set="classic" class="on">Classic</button><button type="button" data-set="tokyo">Tokyo Drift</button></div>
     <div class="cars" id="cars">
@@ -137,7 +139,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.8';
+const BUILD = '2026-11-21.9';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
@@ -187,19 +189,47 @@ function tachRender(dt){
 }
 function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
-scene.add(new THREE.HemisphereLight(0xdfe9f5, 0x4a4234, 0.85));
+const HEMI = new THREE.HemisphereLight(0xdfe9f5, 0x4a4234, 0.85); scene.add(HEMI);
 const sun = new THREE.DirectionalLight(0xfff1dc, 1.7); sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, {left:-30, right:30, top:30, bottom:-30, near:1, far:220}); sun.shadow.bias = -0.0006;
 scene.add(sun, sun.target);
 const SUN_DIR = new V3(-0.45, 0.8, 0.35).normalize();
 const sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 32, 16), new THREE.ShaderMaterial({ side:THREE.BackSide, depthWrite:false, fog:false,
-  uniforms:{ sd:{value:SUN_DIR} },
+  uniforms:{ sd:{value:SUN_DIR}, night:{value:0} },
   vertexShader:'varying vec3 vp; void main(){ vp = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-  fragmentShader:`uniform vec3 sd; varying vec3 vp;
+  fragmentShader:`uniform vec3 sd; uniform float night; varying vec3 vp;
+    float hash(vec3 p){ p = fract(p*0.3183099 + 0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x + p.y + p.z)); }
     void main(){ float h = clamp(vp.y, 0.0, 1.0); vec3 c = mix(vec3(0.73,0.78,0.83), vec3(0.20,0.42,0.74), pow(h, 0.45));
-      float s = max(dot(vp, sd), 0.0); c += vec3(1.0,0.86,0.62)*(pow(s, 6.0)*0.18 + pow(s, 600.0)*2.0); gl_FragColor = vec4(c, 1.0); }` }));
+      float s = max(dot(vp, sd), 0.0); c += vec3(1.0,0.86,0.62)*(pow(s, 6.0)*0.18 + pow(s, 600.0)*2.0);
+      // night: deep blue-black sky, a pink-violet city glow on the horizon, stars and a moon
+      vec3 n = mix(vec3(0.16,0.05,0.20), vec3(0.012,0.018,0.05), pow(h, 0.35));
+      n += vec3(0.35,0.08,0.40)*exp(-h*14.0)*0.8 + vec3(0.05,0.18,0.42)*exp(-h*5.0)*0.25;
+      vec3 q = floor(vp*420.0); float st = step(0.9965, hash(q))*smoothstep(0.05, 0.3, h); n += vec3(0.85,0.9,1.0)*st*(0.5 + 0.5*hash(q + 3.1));
+      float m = max(dot(vp, normalize(vec3(0.35, 0.55, -0.75))), 0.0); n += vec3(0.75,0.8,1.0)*(pow(m, 900.0)*3.0 + pow(m, 30.0)*0.08);
+      gl_FragColor = vec4(mix(c, n, night), 1.0); }` }));
 scene.add(sky);
 
+/* ---------- night mode ----------
+   Moonlight and a dark blue sky with a neon city glow; every car's headlights come on (a glow at each lamp and a pool of
+   light on the road ahead), and your own car also throws a real beam that lights up the track. */
+let NIGHT = store.get('night', false);
+const NIGHT_LIGHTS = [];
+{ // a few coloured lights around the start straight for the night vibe
+  [[0xff2fd6, -78, -44], [0x2fa8ff, 5, -20], [0xff7a1a, 38, -44], [0x8a3dff, 72, -20]].forEach(([c, x, z]) => { const l = new THREE.PointLight(c, 0, 30, 1.8); l.position.set(x, 7, z); scene.add(l); NIGHT_LIGHTS.push(l); }); }
+const HEAD_BEAM = new THREE.SpotLight(0xe8f0ff, 0, 70, 0.48, 0.55, 1.2); HEAD_BEAM.castShadow = false; scene.add(HEAD_BEAM, HEAD_BEAM.target);
+function applyNight(){
+  const n = NIGHT ? 1 : 0;
+  sky.material.uniforms.night.value = n;
+  scene.fog.color.set(n ? 0x0c0f22 : FOGC); scene.fog.near = n ? 30 : 120; scene.fog.far = n ? 330 : 650;
+  HEMI.color.set(n ? 0x5a6aa8 : 0xdfe9f5); HEMI.groundColor.set(n ? 0x1a1020 : 0x4a4234); HEMI.intensity = n ? 0.38 : 0.85;
+  sun.color.set(n ? 0x9fb2ff : 0xfff1dc); sun.intensity = n ? 0.32 : 1.7;
+  renderer.toneMappingExposure = n ? 1.2 : 1.05;
+  NIGHT_LIGHTS.forEach(l => l.intensity = n ? 1.6 : 0);
+  // reflections on the paint would still show a daytime sky
+  scene.traverse(o => { if(o.isMesh){ (Array.isArray(o.material) ? o.material : [o.material]).forEach(mt => { if(mt && mt.envMap){ if(mt.userData.envI === undefined) mt.userData.envI = mt.envMapIntensity; mt.envMapIntensity = mt.userData.envI*(n ? 0.25 : 1); } }); } });
+  document.querySelectorAll('#tod button').forEach(b => b.classList.toggle('on', (b.dataset.tod === 'night') === NIGHT));
+}
+function headlights(g, on){ g.traverse(o => { if(o.userData.headGlow || o.userData.headPool) o.visible = NIGHT && on; }); }
 /* ---------- loading ---------- */
 let loaded = 0; const NEED = 2;
 const loadBar = () => $('loadBar').style.width = Math.round(loaded/NEED*100) + '%';
@@ -234,7 +264,7 @@ function loadCar(key, cb){
   if(C.model){ cb && cb(C); return; }
   if(C.loading){ C.loading.push(cb); return; }
   C.loading = [cb];
-  loader.load(C.file, g => { prepCar(C, g.scene); const l = C.loading; C.loading = null; l.forEach(f => f && f(C)); }, undefined, () => $('status').textContent = "Couldn't load the car.");
+  loader.load(C.file, g => { prepCar(C, g.scene); if(NIGHT) setTimeout(applyNight, 0); const l = C.loading; C.loading = null; l.forEach(f => f && f(C)); }, undefined, () => $('status').textContent = "Couldn't load the car.");
 }
 loadCar(carKey, () => { loaded++; loadBar(); maybeReady(); SETS[setOf(carKey)].forEach(k => loadCar(k)); });
 
@@ -377,6 +407,11 @@ function setLamps(L, state, blink){
   }
   for(const gm of L.glow){ gm.color.copy(col); gm.opacity = Math.min(1, k/5)*(k > 6 ? 1 : 0.7); }
 }
+let BEAM = null;
+function beamTex(){ if(BEAM) return BEAM; const c = document.createElement('canvas'); c.width = 64; c.height = 128; const g = c.getContext('2d'); const im = g.createImageData(64, 128);
+  for(let j = 0; j < 128; j++) for(let i = 0; i < 64; i++){ const v = j/127, u = (i - 31.5)/31.5, w = 0.25 + 0.75*(1 - v);   // v=0 far end, v=1 at the car
+    const a = Math.exp(-Math.pow(u/w, 2)*2.2)*Math.pow(1 - v*0.15, 1)*Math.sin(Math.PI*Math.min(1, (1 - v)*1.1 + 0.05))*(0.35 + 0.65*v); im.data.set([255, 255, 255, Math.round(255*Math.max(0, Math.min(1, a)))], (j*64 + i)*4); }
+  g.putImageData(im, 0, 0); BEAM = new THREE.CanvasTexture(c); return BEAM; }
 let GLOW = null;
 function glowTex(){ if(GLOW) return GLOW; const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); GLOW = new THREE.CanvasTexture(c); return GLOW; }
 function prepCar(C, m){
@@ -569,6 +604,14 @@ function prepCar(C, m){
       for(const sx of [-1, 1]){ const tube = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, L*0.7), tubeM); tube.position.set((b2.min.x + b2.max.x)/2 + sx*(Wd/2 - 0.22), 0.16, (b2.min.z + b2.max.z)/2); root.add(tube); }
       { const tube = new THREE.Mesh(new THREE.BoxGeometry(Wd*0.6, 0.035, 0.05), tubeM); tube.position.set((b2.min.x + b2.max.x)/2, 0.2, b2.min.z + 0.3); root.add(tube); }
     } }
+  // headlights (night): a bright glow at each front lamp and a long pool of light on the road ahead
+  { root.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(m), hw = (bb.max.x - bb.min.x)/2, fzz = bb.max.z;
+    const hy = C.headY || Math.min(0.7, bb.min.y + (bb.max.y - bb.min.y)*0.45);
+    for(const sx of [-1, 1]){ const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex(), color:0xdfe8ff, transparent:true, opacity:0.95, depthWrite:false, blending:THREE.AdditiveBlending, toneMapped:false}));
+      sp.position.set(sx*hw*0.68, hy, fzz + 0.06); sp.scale.set(0.8, 0.5, 1); sp.userData.headGlow = true; sp.visible = false; root.add(sp); }
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map:beamTex(), color:0xcfdcff, transparent:true, opacity:0.38, depthWrite:false, blending:THREE.AdditiveBlending, toneMapped:false}));
+    pool.rotation.x = -Math.PI/2; pool.scale.set(hw*4.2, 16, 1); pool.position.set(0, 0.03, fzz + 8); pool.renderOrder = 2; pool.userData.headPool = true; pool.visible = false; root.add(pool);
+    C.front = fzz; C.headY = hy; }
   // the body hangs on its own pivot so it can lean in corners while the wheels stay planted on the road
   { const pv = new THREE.Group(); pv.position.set(0, 0.45, 0); root.add(pv); root.updateMatrixWorld(true); pv.attach(m); C.body = pv; }
   C.model = root; C.wheels = wheels; C.sw = swPivot;
@@ -621,7 +664,7 @@ function showSlot(key){
 function showroomTick(){
   for(const k of SHOW.order){
     const Cc = CARS[k]; if(!Cc.model || SHOW.cars[k]) continue;
-    const g = cloneCar(Cc).g, p = showSlot(k); g.position.set(p.x, hAt(p.x, p.z), p.z); g.rotation.set(0, p.h, 0); scene.add(g); SHOW.cars[k] = g;
+    const g = cloneCar(Cc).g, p = showSlot(k); g.position.set(p.x, hAt(p.x, p.z), p.z); g.rotation.set(0, p.h, 0); headlights(g, true); scene.add(g); SHOW.cars[k] = g;
   }
   // the parked line-up only stays during the solo start sweep; online you start on the grid, where it would overlap you
   for(const k in SHOW.cars) SHOW.cars[k].visible = !S.started || (!NET.game && S.intro > 0 && k !== carKey);
@@ -679,6 +722,8 @@ function showSet(set, pick){
     carKey = k; store.set('car', k); if(loaded >= NEED) setCar(k); }
 }
 document.querySelectorAll('#sets button').forEach(b => b.addEventListener('click', () => showSet(b.dataset.set, true)));
+document.querySelectorAll('#tod button').forEach(b => b.addEventListener('click', () => { NIGHT = b.dataset.tod === 'night'; store.set('night', NIGHT); applyNight(); for(const k in SHOW.cars) headlights(SHOW.cars[k], true); }));
+applyNight();
 document.querySelectorAll('#cars button').forEach(b => { b.classList.toggle('on', b.dataset.car === carKey); b.addEventListener('click', () => {
   document.querySelectorAll('#cars button').forEach(q => q.classList.toggle('on', q === b));
   carKey = b.dataset.car; store.set('car', carKey); if(loaded >= NEED) setCar(carKey); }); });
@@ -1090,6 +1135,8 @@ function updateCar(dt){
     const st = S.amberT > 0 ? 'amber' : S.engineOn !== false && S.started ? (S.brk ? 'brake' : 'run') : 'off';
     setLamps({tail:C.tail, amber:C.tailAmber || [], band:C.tailBand || [], glow:C.tailGlow}, st, Math.floor(S.amberT/0.32) % 2 === 0);
   }
+  { const on = NIGHT && S.started && S.engineOn !== false; headlights(car, on); HEAD_BEAM.intensity = on ? 2.4 : 0;
+    if(on){ car.updateMatrixWorld(true); HEAD_BEAM.position.copy(car.localToWorld(new V3(0, C.headY || 0.6, (C.front || 2.1) + 0.2))); HEAD_BEAM.target.position.copy(car.localToWorld(new V3(0, -0.6, (C.front || 2.1) + 18))); HEAD_BEAM.target.updateMatrixWorld(); } }
   if(flameT > 0){ flameT -= dt; const e = C.exhaust.clone().applyMatrix4(car.matrixWorld); flameMesh.position.copy(e); flameMesh.visible = Math.random() > 0.25; flameMesh.scale.setScalar(0.35 + Math.random()*0.35); } else flameMesh.visible = false;
   sun.position.set(S.x + SUN_DIR.x*120, S.y + SUN_DIR.y*120, S.z + SUN_DIR.z*120); sun.target.position.set(S.x, S.y, S.z);
 }
@@ -1332,6 +1379,7 @@ function netTick(dt){
     for(const w of r.car.wheels){ w.spin.rotation.x += vf*dt/0.3; if(w.front) w.steer.rotation.y = r.st; }
     remoteAudio(r, dt);
     // their tail lamps and cold-start smoke, exactly as they see them
+    headlights(r.car.g, r.on && r.eo !== false);
     if(r.car.lamps){ const st = r.am ? 'amber' : (r.eo !== false && r.on) ? (r.br ? 'brake' : 'run') : 'off'; setLamps(r.car.lamps, st, Math.floor(now()/0.32) % 2 === 0); }
     if(r.C && (r.cs || (r.ct >= 0 && r.ct < 7))){ r.exAcc = (r.exAcc || 0) + dt*(r.cs ? 3 : 14*Math.exp(-r.ct/2.2)); r.car.g.updateMatrixWorld(true);
       while(r.exAcc >= 1){ r.exAcc -= 1; exhPuff(r.cs ? 0.5 : 0.6 + 0.4*Math.exp(-r.ct/1.5), r.car.g, r.C, r.h); } }
