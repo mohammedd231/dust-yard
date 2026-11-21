@@ -137,7 +137,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.5';
+const BUILD = '2026-11-21.6';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
@@ -205,7 +205,7 @@ let loaded = 0; const NEED = 2;
 const loadBar = () => $('loadBar').style.width = Math.round(loaded/NEED*100) + '%';
 const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null;
-const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
+const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, exhaustAt:[-0.42, 0.3, -2.12], drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
                integra:{ file:'models/drift/integra.glb', name:'Acura Integra', length:4.53, drive:'rwd', power:150000, mass:1180, redline:7600, gears:[3.23, 1.9, 1.27, 0.97, 0.78], final:4.4, model:null,
                  wheelMat:/^(rims|tire_rim|rotor|caliper|black_rims|rim_metal)$/, neon:0x1e9bff },
                jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff },
@@ -352,6 +352,31 @@ function neonRearTex(){
     im.data.set([255, 255, 255, Math.round(255*clamp(a*1.1, 0, 1))], (j*128 + i)*4); }
   g.putImageData(im, 0, 0); NEON_REAR = new THREE.CanvasTexture(c); return NEON_REAR;
 }
+// thin amber line drawn inside a lamp's own shader (Eclipse); returns the vector whose z is the line's brightness
+function bandShader(mt){
+  const cfg = mt.userData.bandCfg, band = {value:new THREE.Vector3(cfg.yc, cfg.hh, 0)}, up = {value:new V3(...cfg.up)};
+  mt.onBeforeCompile = sh => { sh.uniforms.uBand = band; sh.uniforms.uUp = up;
+    sh.vertexShader = 'uniform vec3 uUp;\nvarying float vLampY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLampY = dot(transformed, uUp);');
+    sh.fragmentShader = 'uniform vec3 uBand;\nvarying float vLampY;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  { float bnd = 1.0 - smoothstep(uBand.y*0.55, uBand.y, abs(vLampY - uBand.x)); totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(1.0, 0.55, 0.05)*uBand.z, bnd*step(0.0001, uBand.z)); }'); };
+  mt.customProgramCacheKey = () => 'lampband'; mt.needsUpdate = true; return band.value;
+}
+// light a set of tail lamps: state 'off' | 'run' | 'brake' | 'amber' (with blink phase 0/1)
+function setLamps(L, state, blink){
+  if(!L || !L.tail.length) return;
+  let col = LAMP_RED, k = state === 'brake' ? 9 : state === 'run' ? 0.55 : 0;
+  const zoned = L.amber.length || L.band.length;
+  if(state === 'amber'){ col = LAMP_AMBER; k = blink ? 5 : 0; }
+  if(zoned && state === 'amber'){
+    for(const mt of L.amber){ mt.emissive.copy(LAMP_AMBER); mt.emissiveIntensity = k; }
+    for(const mt of L.tail){ mt.emissive.copy(LAMP_RED); mt.emissiveIntensity = 1.6; }
+    for(const b of L.band) b.z = k;
+  } else {
+    for(const mt of L.tail){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
+    for(const mt of L.amber){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
+    for(const b of L.band) b.z = 0;
+  }
+  for(const gm of L.glow){ gm.color.copy(col); gm.opacity = Math.min(1, k/5)*(k > 6 ? 1 : 0.7); }
+}
 let GLOW = null;
 function glowTex(){ if(GLOW) return GLOW; const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); GLOW = new THREE.CanvasTexture(c); return GLOW; }
 function prepCar(C, m){
@@ -482,11 +507,8 @@ function prepCar(C, m){
       const g0 = o.geometry, pa = g0.attributes.position, nrm = pa.normalized ? (pa.array instanceof Int16Array ? 32767 : pa.array instanceof Uint16Array ? 65535 : pa.array instanceof Int8Array ? 127 : 255) : 1;
       o.updateMatrixWorld(true); const upL = new V3(0, 1, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(o.matrixWorld).invert()).normalize();
       let lo = Infinity, hi = -Infinity; const v = new V3(); for(let i = 0; i < pa.count; i++){ v.fromBufferAttribute(pa, i).divideScalar(nrm); const d = v.dot(upL); if(d < lo) lo = d; if(d > hi) hi = d; }
-      const mt = o.material, band = {value:new THREE.Vector3((lo + hi)/2, (hi - lo)*0.13, 0)}, up = {value:upL};
-      mt.onBeforeCompile = sh => { sh.uniforms.uBand = band; sh.uniforms.uUp = up;
-        sh.vertexShader = 'uniform vec3 uUp;\nvarying float vLampY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLampY = dot(transformed, uUp);');
-        sh.fragmentShader = 'uniform vec3 uBand;\nvarying float vLampY;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  { float bnd = 1.0 - smoothstep(uBand.y*0.55, uBand.y, abs(vLampY - uBand.x)); totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(1.0, 0.55, 0.05)*uBand.z, bnd*step(0.0001, uBand.z)); }'); };
-      mt.customProgramCacheKey = () => 'lampband'; mt.needsUpdate = true; (C.tailBand = C.tailBand || []).push(band.value);
+      const mt = o.material; mt.userData.bandCfg = {yc:(lo + hi)/2, hh:(hi - lo)*0.13, up:[upL.x, upL.y, upL.z]};
+      (C.tailBand = C.tailBand || []).push(bandShader(mt));
     }
     if(C.amberZone === 'inner' && lamps.length){
       const tris = [], v = new V3();
@@ -506,7 +528,7 @@ function prepCar(C, m){
         if(!A.length) continue;
         const ga = new THREE.BufferGeometry(); for(const k in g0.attributes) ga.setAttribute(k, g0.attributes[k]); ga.setIndex(A);
         const gb = new THREE.BufferGeometry(); for(const k in g0.attributes) gb.setAttribute(k, g0.attributes[k]); gb.setIndex(B); o.geometry = gb;
-        const ma = o.material.clone(); const am = new THREE.Mesh(ga, ma); am.position.copy(o.position); am.quaternion.copy(o.quaternion); am.scale.copy(o.scale); am.userData.tailLamp = true; o.parent.add(am); C.tailAmber.push(ma); }
+        const ma = o.material.clone(); const am = new THREE.Mesh(ga, ma); am.position.copy(o.position); am.quaternion.copy(o.quaternion); am.scale.copy(o.scale); am.userData.tailLamp = true; am.userData.amberPart = true; o.parent.add(am); C.tailAmber.push(ma); }
     }
     // a soft glow just behind each lamp cluster (left and right) so the lamps read as lit from a distance
     root.updateMatrixWorld(true); C.tailGlow = [];
@@ -524,6 +546,7 @@ function prepCar(C, m){
     C.exhaustPts = [];
     if(pts.length){ const zmin = Math.min(...pts.map(p => p.z)), tip = pts.filter(p => p.z < zmin + 0.07);
       for(const side of [-1, 0, 1]){ const g = tip.filter(p => side < 0 ? p.x < -0.12 : side > 0 ? p.x > 0.12 : Math.abs(p.x) <= 0.12); if(g.length > 3){ const c = new V3(); g.forEach(p => c.add(p)); c.divideScalar(g.length); C.exhaustPts.push(c); } } }
+    if(C.exhaustAt){ C.exhaustPts = [new V3(...C.exhaustAt)]; }
     if(!C.exhaustPts.length) C.exhaustPts.push(C.exhaust.clone()); else C.exhaust = C.exhaustPts[0].clone();
   }
   // neon underglow: a glow on the ground under the car plus a light strip along each sill
@@ -557,8 +580,12 @@ function cloneCar(C){
   const at = (root, p) => p.reduce((o, i) => o.children[i], root);
   C.wheels.forEach(w => { const s = at(r, path(C.model, w.steer)); wheels.push({steer:s, spin:s.children[0], front:w.front}); });
   // its own lamp materials, so it doesn't light up when you brake
-  r.traverse(o => { if(o.userData.tailLamp){ o.material = o.material.clone(); o.material.emissiveIntensity = 0; } if(o.userData.tailGlow){ o.material = o.material.clone(); o.material.opacity = 0; } });
-  return {g:r, wheels};
+  const lamps = {tail:[], amber:[], band:[], glow:[]};
+  r.traverse(o => { if(o.userData.tailLamp){ const src = o.material; o.material = src.clone(); o.material.emissiveIntensity = 0;
+      if(src.userData.bandCfg){ o.material.userData.bandCfg = src.userData.bandCfg; lamps.band.push(bandShader(o.material)); }
+      (o.userData.amberPart ? lamps.amber : lamps.tail).push(o.material); }
+    if(o.userData.tailGlow){ o.material = o.material.clone(); o.material.opacity = 0; lamps.glow.push(o.material); } });
+  return {g:r, wheels, lamps};
 }
 
 /* ---------- state ---------- */
@@ -993,8 +1020,8 @@ let smokeI = 0;
 // thin exhaust smoke (cold start): small, slow, drifting back and up
 const EXH = []; for(let i = 0; i < 70; i++){ const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, color:0xd4d8dd, transparent:true, opacity:0, depthWrite:false})); sp.visible = false; scene.add(sp); EXH.push({sp, life:0, v:new V3(), k:1}); }
 let exhI = 0;
-function exhPuff(k){ if(!car || !C || !C.exhaustPts) return; const fx = Math.sin(S.h), fz = Math.cos(S.h);
-  for(const e of C.exhaustPts){ const P = EXH[exhI++ % EXH.length], w = e.clone(); car.localToWorld(w); P.sp.position.copy(w); P.sp.visible = true; P.life = 1; P.k = k;
+function exhPuff(k, g, Cc, h){ g = g || car; Cc = Cc || C; h = h === undefined ? S.h : h; if(!g || !Cc || !Cc.exhaustPts) return; const fx = Math.sin(h), fz = Math.cos(h);
+  for(const e of Cc.exhaustPts){ const P = EXH[exhI++ % EXH.length], w = e.clone(); g.localToWorld(w); P.sp.position.copy(w); P.sp.visible = true; P.life = 1; P.k = k;
     P.v.set(-fx*(0.5 + Math.random()*0.5) + (Math.random() - 0.5)*0.25, 0.18 + Math.random()*0.25, -fz*(0.5 + Math.random()*0.5) + (Math.random() - 0.5)*0.25); P.sp.scale.setScalar(0.12); } }
 function exhTick(dt){ for(const P of EXH){ if(P.life <= 0) continue; P.life -= dt*0.38; P.sp.position.addScaledVector(P.v, dt); P.v.multiplyScalar(Math.exp(-dt*0.6)); P.v.y += dt*0.12; P.sp.scale.setScalar(0.12 + (1 - P.life)*1.5); P.sp.material.opacity = Math.max(0, P.life)*0.32*P.k; if(P.life <= 0) P.sp.visible = false; }
   // emit: a cough when it catches, then a fading wisp while it warms up
@@ -1042,19 +1069,9 @@ function updateCar(dt){
   // exhaust flame on pops
   // tail lamps: amber flashes while it starts, dim red running lights with the engine on, bright red on the brakes
   if(C.tail && C.tail.length){
-    let col = LAMP_RED, k = 0, zoned = (C.tailAmber && C.tailAmber.length) || C.tailBand;
-    if(S.amberT > 0){ S.amberT -= dt; col = LAMP_AMBER; k = Math.floor(S.amberT/0.32) % 2 === 0 ? 5 : 0; }
-    else if(S.engineOn !== false && S.started){ k = S.brk ? 9 : 0.55; }
-    if(zoned && S.amberT > 0){   // only the amber part flashes; the red around it stays lit
-      for(const mt of C.tailAmber){ mt.emissive.copy(LAMP_AMBER); mt.emissiveIntensity = k; }
-      for(const mt of C.tail){ mt.emissive.copy(LAMP_RED); mt.emissiveIntensity = 1.6; }
-      if(C.tailBand) for(const b of C.tailBand) b.z = k;
-    } else {
-      for(const mt of C.tail){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
-      if(zoned) for(const mt of C.tailAmber){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
-      if(C.tailBand) for(const b of C.tailBand) b.z = 0;
-    }
-    for(const gm of C.tailGlow){ gm.color.copy(col); gm.opacity = Math.min(1, k/5)*(k > 6 ? 1 : 0.7); }
+    if(S.amberT > 0) S.amberT -= dt;
+    const st = S.amberT > 0 ? 'amber' : S.engineOn !== false && S.started ? (S.brk ? 'brake' : 'run') : 'off';
+    setLamps({tail:C.tail, amber:C.tailAmber || [], band:C.tailBand || [], glow:C.tailGlow}, st, Math.floor(S.amberT/0.32) % 2 === 0);
   }
   if(flameT > 0){ flameT -= dt; const e = C.exhaust.clone().applyMatrix4(car.matrixWorld); flameMesh.position.copy(e); flameMesh.visible = Math.random() > 0.25; flameMesh.scale.setScalar(0.35 + Math.random()*0.35); } else flameMesh.visible = false;
   sun.position.set(S.x + SUN_DIR.x*120, S.y + SUN_DIR.y*120, S.z + SUN_DIR.z*120); sun.target.position.set(S.x, S.y, S.z);
@@ -1214,7 +1231,7 @@ function slotClash(){ if(!NET.game || !S.started || !Number.isInteger(S.slot)) r
 function sendState(){
   if(!NET.game || !NET.live) return;
   const r2 = v => Math.round(v*100)/100;
-  const pl = {v:1, id:NET.id, n:myName, c:carKey, x:r2(S.x), y:r2(S.y), z:r2(S.z), h:Math.round(S.h*1000)/1000, s:r2(S.steer), vx:r2(S.vx), vz:r2(S.vz), sl:r2(S.slipR), rpm:Math.round(S.rpm), th:S.thr ? 1 : 0, eo:S.engineOn === false ? 0 : 1, pc:S.popN || 0, b:S.best, tt:S.total, d:Math.round(S.drift), on:S.started && !S.paused ? 1 : 0};
+  const pl = {v:1, id:NET.id, n:myName, c:carKey, x:r2(S.x), y:r2(S.y), z:r2(S.z), h:Math.round(S.h*1000)/1000, s:r2(S.steer), vx:r2(S.vx), vz:r2(S.vz), sl:r2(S.slipR), rpm:Math.round(S.rpm), th:S.thr ? 1 : 0, eo:S.engineOn === false ? 0 : 1, pc:S.popN || 0, br:S.brk ? 1 : 0, am:S.amberT > 0 ? 1 : 0, cs:S.starting ? 1 : 0, ct:S.coldT !== undefined ? Math.round(S.coldT*10)/10 : -1, b:S.best, tt:S.total, d:Math.round(S.drift), on:S.started && !S.paused ? 1 : 0};
   try{ const p = NET.game.send({type:'broadcast', event:'st', payload:pl}); if(p && p.catch) p.catch(() => {}); }catch(e){}
 }
 const _pop = pop; pop = function(n, v){ _pop(n, v); S.popN = (S.popN || 0) + 1; S.sendSoon = true; };   // others see it through the pop count in our next state message
@@ -1234,6 +1251,7 @@ function onRemote(p){
   r.tx = clamp(f(p.x, r.x), -3000, 3000); r.ty = f(p.y, r.y); r.tz = clamp(f(p.z, r.z), -3000, 3000); r.th = f(p.h, r.h); r.vx = clamp(f(p.vx, 0), -120, 120); r.vz = clamp(f(p.vz, 0), -120, 120);
   r.st = clamp(f(p.s, 0), -1, 1); r.sl = clamp(f(p.sl, 0), 0, 1); r.best = Math.max(0, f(p.b, 0)|0); r.total = Math.max(0, f(p.tt, 0)|0); r.d = Math.max(0, f(p.d, 0)|0); r.on = !!p.on; r.t = now();
   { const pc = Math.max(0, f(p.pc, 0)|0); if(r.pc !== undefined && pc > r.pc && r.car) remotePop(r, Math.min(3, pc - r.pc)); r.pc = pc; }
+  r.br = p.br ? 1 : 0; r.am = p.am ? 1 : 0; r.cs = p.cs ? 1 : 0; r.ct = f(p.ct, -1);
   r.rpm = clamp(f(p.rpm, 900), 0, 12000); r.gas = p.th ? 1 : 0; r.eo = p.eo !== 0;   // (r.th is their heading)
 }
 function dropRemote(id){ const r = NET.remotes.get(id); if(!r) return; if(r.car) scene.remove(r.car.g); if(r.flame) scene.remove(r.flame); remoteAudioStop(r); NET.remotes.delete(id); renderRaces(); }
@@ -1296,6 +1314,10 @@ function netTick(dt){
     const vf = r.vx*Math.sin(r.h) + r.vz*Math.cos(r.h);
     for(const w of r.car.wheels){ w.spin.rotation.x += vf*dt/0.3; if(w.front) w.steer.rotation.y = r.st; }
     remoteAudio(r, dt);
+    // their tail lamps and cold-start smoke, exactly as they see them
+    if(r.car.lamps){ const st = r.am ? 'amber' : (r.eo !== false && r.on) ? (r.br ? 'brake' : 'run') : 'off'; setLamps(r.car.lamps, st, Math.floor(now()/0.32) % 2 === 0); }
+    if(r.C && (r.cs || (r.ct >= 0 && r.ct < 7))){ r.exAcc = (r.exAcc || 0) + dt*(r.cs ? 3 : 14*Math.exp(-r.ct/2.2)); r.car.g.updateMatrixWorld(true);
+      while(r.exAcc >= 1){ r.exAcc -= 1; exhPuff(r.cs ? 0.5 : 0.6 + 0.4*Math.exp(-r.ct/1.5), r.car.g, r.C, r.h); } }
     if(r.flame){ if(r.flameT > 0 && r.C && r.C.exhaust){ r.flameT -= dt; r.car.g.updateMatrixWorld(true); r.flame.position.copy(r.C.exhaust.clone().applyMatrix4(r.car.g.matrixWorld)); r.flame.visible = Math.random() > 0.2; r.flame.scale.setScalar(0.45 + Math.random()*0.4); } else r.flame.visible = false; }
     // their smoke
     if(r.sl > 0.35 && Math.hypot(r.vx, r.vz) > 4 && Math.random() < r.sl){ const fx = Math.sin(r.h), fz = Math.cos(r.h); const p = new V3(r.x - fx*1.25, r.y + 0.25, r.z - fz*1.25); puff(p, r.sl); }
