@@ -137,7 +137,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.4';
+const BUILD = '2026-11-21.5';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
@@ -1214,10 +1214,10 @@ function slotClash(){ if(!NET.game || !S.started || !Number.isInteger(S.slot)) r
 function sendState(){
   if(!NET.game || !NET.live) return;
   const r2 = v => Math.round(v*100)/100;
-  const pl = {v:1, id:NET.id, n:myName, c:carKey, x:r2(S.x), y:r2(S.y), z:r2(S.z), h:Math.round(S.h*1000)/1000, s:r2(S.steer), vx:r2(S.vx), vz:r2(S.vz), sl:r2(S.slipR), rpm:Math.round(S.rpm), th:S.thr ? 1 : 0, eo:S.engineOn === false ? 0 : 1, b:S.best, tt:S.total, d:Math.round(S.drift), on:S.started && !S.paused ? 1 : 0};
+  const pl = {v:1, id:NET.id, n:myName, c:carKey, x:r2(S.x), y:r2(S.y), z:r2(S.z), h:Math.round(S.h*1000)/1000, s:r2(S.steer), vx:r2(S.vx), vz:r2(S.vz), sl:r2(S.slipR), rpm:Math.round(S.rpm), th:S.thr ? 1 : 0, eo:S.engineOn === false ? 0 : 1, pc:S.popN || 0, b:S.best, tt:S.total, d:Math.round(S.drift), on:S.started && !S.paused ? 1 : 0};
   try{ const p = NET.game.send({type:'broadcast', event:'st', payload:pl}); if(p && p.catch) p.catch(() => {}); }catch(e){}
 }
-const _pop = pop; pop = function(n, v){ _pop(n, v); if(NET.game && NET.live) try{ const p = NET.game.send({type:'broadcast', event:'pop', payload:{id:NET.id}}); if(p && p.catch) p.catch(() => {}); }catch(e){} };
+const _pop = pop; pop = function(n, v){ _pop(n, v); S.popN = (S.popN || 0) + 1; S.sendSoon = true; };   // others see it through the pop count in our next state message
 function nameTag(name){
   const c = document.createElement('canvas'); c.width = 256; c.height = 64; const g = c.getContext('2d');
   g.fillStyle = 'rgba(10,11,14,.78)'; g.fillRect(0, 8, 256, 48); g.fillStyle = '#ff5a1f'; g.fillRect(0, 8, 8, 48);
@@ -1233,15 +1233,17 @@ function onRemote(p){
   if(r.key !== key){ r.key = key; if(r.car){ scene.remove(r.car.g); r.car = null; } if(r.flame){ scene.remove(r.flame); r.flame = null; } loadCar(key, Cc => { if(NET.remotes.get(r.id) !== r || r.key !== key || r.car) return; r.car = cloneCar(Cc); r.C = Cc; r.car.g.add(r.tag = nameTag(r.name)); scene.add(r.car.g); }); }
   r.tx = clamp(f(p.x, r.x), -3000, 3000); r.ty = f(p.y, r.y); r.tz = clamp(f(p.z, r.z), -3000, 3000); r.th = f(p.h, r.h); r.vx = clamp(f(p.vx, 0), -120, 120); r.vz = clamp(f(p.vz, 0), -120, 120);
   r.st = clamp(f(p.s, 0), -1, 1); r.sl = clamp(f(p.sl, 0), 0, 1); r.best = Math.max(0, f(p.b, 0)|0); r.total = Math.max(0, f(p.tt, 0)|0); r.d = Math.max(0, f(p.d, 0)|0); r.on = !!p.on; r.t = now();
+  { const pc = Math.max(0, f(p.pc, 0)|0); if(r.pc !== undefined && pc > r.pc && r.car) remotePop(r, Math.min(3, pc - r.pc)); r.pc = pc; }
   r.rpm = clamp(f(p.rpm, 900), 0, 12000); r.gas = p.th ? 1 : 0; r.eo = p.eo !== 0;   // (r.th is their heading)
 }
 function dropRemote(id){ const r = NET.remotes.get(id); if(!r) return; if(r.car) scene.remove(r.car.g); if(r.flame) scene.remove(r.flame); remoteAudioStop(r); NET.remotes.delete(id); renderRaces(); }
-function remotePop(r){
+function remotePop(r, n){
+  n = n || 1;
   // their flame shows on their exhaust; their bang comes out of their car (3D, through their own engine's panner)
-  if(r.car){ if(!r.flame){ r.flame = flameMesh.clone(); r.flame.visible = false; scene.add(r.flame); } r.flameT = 0.28; }
+  if(r.car){ if(!r.flame){ r.flame = flameMesh.clone(); r.flame.visible = false; scene.add(r.flame); } r.flameT = 0.2 + 0.1*n; }
   if(!A || !AC || !r.audio) return;
   const P = SAMPLES[r.key], bufs = P && P.ready && P.popBufs; if(!bufs || !bufs.length) return;
-  for(let k = 0; k < 2; k++) setTimeout(() => { if(!r.audio) return; const s = AC.createBufferSource(); s.buffer = bufs[Math.random()*bufs.length|0]; s.playbackRate.value = 0.9 + Math.random()*0.25;
+  for(let k = 0; k < n; k++) setTimeout(() => { if(!r.audio) return; const s = AC.createBufferSource(); s.buffer = bufs[Math.random()*bufs.length|0]; s.playbackRate.value = 0.9 + Math.random()*0.25;
     const g = AC.createGain(); g.gain.value = 0.8; s.connect(g); g.connect(r.audio.pan); s.start(); }, k*(50 + Math.random()*60));
 }
 /* Other players' engines: each nearby car gets its own copy of its engine sound, placed in 3D where the car is,
@@ -1281,7 +1283,7 @@ function netTick(dt){
   if(A && AC && NET.remotes.size) setListener();
   if(!NET.game) return;
   const t = now();
-  NET.sendT -= dt; if(NET.sendT <= 0){ NET.sendT = S.started && !S.paused ? 1/12 : 0.5; sendState(); }
+  NET.sendT -= dt; if(S.sendSoon && NET.sendT > 0.03){ NET.sendT = 0.03; } if(NET.sendT <= 0){ S.sendSoon = false; NET.sendT = S.started && !S.paused ? 1/12 : 0.5; sendState(); }
   for(const r of NET.remotes.values()){
     if(t - r.t > 30){ dropRemote(r.id); continue; }
     if(!r.car) continue;
@@ -1294,7 +1296,7 @@ function netTick(dt){
     const vf = r.vx*Math.sin(r.h) + r.vz*Math.cos(r.h);
     for(const w of r.car.wheels){ w.spin.rotation.x += vf*dt/0.3; if(w.front) w.steer.rotation.y = r.st; }
     remoteAudio(r, dt);
-    if(r.flame){ if(r.flameT > 0 && r.C && r.C.exhaust){ r.flameT -= dt; r.car.g.updateMatrixWorld(true); r.flame.position.copy(r.C.exhaust.clone().applyMatrix4(r.car.g.matrixWorld)); r.flame.visible = Math.random() > 0.25; r.flame.scale.setScalar(0.35 + Math.random()*0.35); } else r.flame.visible = false; }
+    if(r.flame){ if(r.flameT > 0 && r.C && r.C.exhaust){ r.flameT -= dt; r.car.g.updateMatrixWorld(true); r.flame.position.copy(r.C.exhaust.clone().applyMatrix4(r.car.g.matrixWorld)); r.flame.visible = Math.random() > 0.2; r.flame.scale.setScalar(0.45 + Math.random()*0.4); } else r.flame.visible = false; }
     // their smoke
     if(r.sl > 0.35 && Math.hypot(r.vx, r.vz) > 4 && Math.random() < r.sl){ const fx = Math.sin(r.h), fz = Math.cos(r.h); const p = new V3(r.x - fx*1.25, r.y + 0.25, r.z - fz*1.25); puff(p, r.sl); }
     // contact: push ourselves out of their car
