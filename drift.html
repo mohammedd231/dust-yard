@@ -172,9 +172,9 @@ const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4
                  wheelMat:/^(ext_tyres|VS_RIM_PLASTIC|VS_RIM_LOGO|VS_RIM_CHROME|VS_RIM_ALUM|ext_ap_disc_hub|ext_ap_disc_front|ext_ap_disc_rear|ext_ap_caliper)$/, tyreMat:/^ext_tyres$/,
                  lampMat:/^tailight$/, lampGlass:/^ext_glass_rear_tinted$/, exhaustMat:/^material$/ },
                r34:{ file:'models/drift/r34.glb', name:'Nissan Skyline GT-R', set:'tokyo', length:4.6, drive:'rwd', power:240000, mass:1500, redline:8000, gears:[3.83, 2.36, 1.69, 1.31, 1.0, 0.79], final:3.9, model:null, neon:0x1e9bff,
-                 wheelMat:/Wheel1A|^material$|riminside|^cal_m$|Calliper/, tyreMat:/^material$/, lampMat:/red_glass/ },
+                 wheelMat:/Wheel1A|^material$|riminside|^cal_m$|Calliper/, tyreMat:/^material$/, lampMat:/red_glass/, amberZone:'inner' },
                eclipse:{ file:'models/drift/eclipse.glb', name:'Mitsubishi Eclipse', set:'tokyo', length:4.39, drive:'rwd', power:165000, mass:1300, redline:7500, gears:[3.36, 1.95, 1.36, 1.03, 0.81], final:4.3, model:null, neon:0x2bff5a,
-                 wheelMat:/Wheel1A|^disk$|^fake_disk$/, tyreMat:/Wheel1A/, lampMat:/red_glass/ } };
+                 wheelMat:/Wheel1A|^disk$|^fake_disk$/, tyreMat:/Wheel1A/, lampMat:/red_glass/, amberZone:'band' } };
 // line-ups on the home screen: the originals, and the Tokyo Drift cars
 const SETS = { classic:['rx7', 'integra', 'jdm'], tokyo:['fortune', 'r34', 'eclipse'] };
 const setOf = k => CARS[k] && CARS[k].set || 'classic';
@@ -413,7 +413,7 @@ function prepCar(C, m){
     hide.forEach(o => { o.visible = false; }); C.hidden = hide.size; }
   // tail lamps: the model's own rear lamp geometry glows, so every car keeps its real lamp shape.
   // Some models (the Integra) keep front and rear lamps in one mesh: cut those in half and only light the back.
-  { root.updateMatrixWorld(true); C.tail = [];
+  { root.updateMatrixWorld(true); C.tail = []; C.tailAmber = []; const lamps = [];
     const lampRe = C.lampMat || /brakelamp|tail.?lights?|lighta/i, cand = [];
     root.traverse(o => { if(o.isMesh && lampRe.test(o.material && o.material.name || '')) cand.push(o); });
     for(const o of cand){
@@ -430,7 +430,41 @@ function prepCar(C, m){
       }
       const mt = rear.material.clone(); if(!mt.emissive) continue; if(mt.transmission) mt.transmission = 0;
       if(mt.transparent || mt.opacity < 1){ mt.transparent = false; mt.opacity = 1; mt.depthWrite = true; }   // a see-through lens would hide its own glow
-      mt.emissive = new THREE.Color(0, 0, 0); mt.emissiveMap = mt.map || null; mt.emissiveIntensity = 0; mt.toneMapped = false; mt.needsUpdate = true; rear.material = mt; rear.userData.tailLamp = true; C.tail.push(mt);
+      mt.emissive = new THREE.Color(0, 0, 0); mt.emissiveMap = mt.map || null; mt.emissiveIntensity = 0; mt.toneMapped = false; mt.needsUpdate = true; rear.material = mt; rear.userData.tailLamp = true; C.tail.push(mt); lamps.push(rear);
+    }
+    // where the amber shows at start-up, for cars whose real lamps have a separate amber part:
+    // 'band'  - a thin amber line across the middle of a full-width red bar (the Eclipse)
+    // 'inner' - the inner circle of each round lamp, with the red ring around it (the Skyline)
+    if(C.amberZone === 'band') for(const o of lamps){
+      // a smooth amber line drawn in the lamp's own shader (cutting triangles would leave a jagged edge)
+      const g0 = o.geometry, pa = g0.attributes.position, nrm = pa.normalized ? (pa.array instanceof Int16Array ? 32767 : pa.array instanceof Uint16Array ? 65535 : pa.array instanceof Int8Array ? 127 : 255) : 1;
+      o.updateMatrixWorld(true); const upL = new V3(0, 1, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(o.matrixWorld).invert()).normalize();
+      let lo = Infinity, hi = -Infinity; const v = new V3(); for(let i = 0; i < pa.count; i++){ v.fromBufferAttribute(pa, i).divideScalar(nrm); const d = v.dot(upL); if(d < lo) lo = d; if(d > hi) hi = d; }
+      const mt = o.material, band = {value:new THREE.Vector3((lo + hi)/2, (hi - lo)*0.13, 0)}, up = {value:upL};
+      mt.onBeforeCompile = sh => { sh.uniforms.uBand = band; sh.uniforms.uUp = up;
+        sh.vertexShader = 'uniform vec3 uUp;\nvarying float vLampY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLampY = dot(transformed, uUp);');
+        sh.fragmentShader = 'uniform vec3 uBand;\nvarying float vLampY;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  { float bnd = 1.0 - smoothstep(uBand.y*0.55, uBand.y, abs(vLampY - uBand.x)); totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(1.0, 0.55, 0.05)*uBand.z, bnd*step(0.0001, uBand.z)); }'); };
+      mt.customProgramCacheKey = () => 'lampband'; mt.needsUpdate = true; (C.tailBand = C.tailBand || []).push(band.value);
+    }
+    if(C.amberZone === 'inner' && lamps.length){
+      const tris = [], v = new V3();
+      for(const o of lamps){ const g0 = o.geometry, pa = g0.attributes.position, nrm = pa.normalized ? (pa.array instanceof Int16Array ? 32767 : pa.array instanceof Uint16Array ? 65535 : pa.array instanceof Int8Array ? 127 : 255) : 1;
+        const idx = g0.index ? g0.index.array : Array.from({length:pa.count}, (_, i) => i); o.updateMatrixWorld(true);
+        for(let t = 0; t < idx.length; t += 3){ let cx = 0, cy = 0; for(let k = 0; k < 3; k++){ v.fromBufferAttribute(pa, idx[t + k]).divideScalar(nrm); o.localToWorld(v); cx += v.x; cy += v.y; } tris.push({o, t, x:cx/3, y:cy/3}); } }
+      const ys = tris.map(q => q.y), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      let isAmber;
+      { // split the lamps apart along x wherever there's a gap, then take the middle of each one
+        const sx = [...tris].sort((a, b) => a.x - b.x), groups = [[sx[0]]];
+        for(let i = 1; i < sx.length; i++){ if(sx[i].x - sx[i - 1].x > 0.02) groups.push([]); groups[groups.length - 1].push(sx[i]); }
+        for(const gq of groups){ const xs = gq.map(q => q.x), yy = gq.map(q => q.y), cx = (Math.min(...xs) + Math.max(...xs))/2, cy = (Math.min(...yy) + Math.max(...yy))/2, R = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...yy) - Math.min(...yy))/2;
+          gq.forEach(q => { q.inner = Math.hypot(q.x - cx, q.y - cy) < 0.5*R; }); }
+        isAmber = q => q.inner; }
+      for(const o of lamps){ const g0 = o.geometry, idx = g0.index ? g0.index.array : Array.from({length:g0.attributes.position.count}, (_, i) => i), A = [], B = [];
+        for(const q of tris) if(q.o === o) (isAmber(q) ? A : B).push(idx[q.t], idx[q.t + 1], idx[q.t + 2]);
+        if(!A.length) continue;
+        const ga = new THREE.BufferGeometry(); for(const k in g0.attributes) ga.setAttribute(k, g0.attributes[k]); ga.setIndex(A);
+        const gb = new THREE.BufferGeometry(); for(const k in g0.attributes) gb.setAttribute(k, g0.attributes[k]); gb.setIndex(B); o.geometry = gb;
+        const ma = o.material.clone(); const am = new THREE.Mesh(ga, ma); am.position.copy(o.position); am.quaternion.copy(o.quaternion); am.scale.copy(o.scale); am.userData.tailLamp = true; o.parent.add(am); C.tailAmber.push(ma); }
     }
     // a soft glow just behind each lamp cluster (left and right) so the lamps read as lit from a distance
     root.updateMatrixWorld(true); C.tailGlow = [];
@@ -777,16 +811,17 @@ const SAMPLES = {
 };
 SAMPLES.fortune = SAMPLES.rx7;   // Han's RX-7 sounds exactly like ours
 // Eclipse GSX: its own cold start, idle and a pull through the gears
-SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', loops:[['idle', 900, 0, 2600], ['pull', 2500, 1700, 99999, 800]], pops:0, coldstart:true, fire:2.05, vol:1.3 };
+SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', loops:[['idle', 900, 0, 2600], ['pull', 2500, 1700, 99999, 800], ['sounds/supra/supra_top.wav', 6900, 7200, 9000, 300, 1.3, 0.3]],
+  pops:4, popFrom:'sounds/supra/supra_pop', flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.45, flutterPitch:1.15, coldstart:true, fire:2.05, vol:1.3 };
 // R34 GT-R: cold start and idle, a steady cruise, a pull for the top end, and real bangs
 SAMPLES.r34 = { dir:'sounds/r34/', prefix:'r34_', loops:[['idle', 1200, 0, 2500, 600], ['cruise', 2400, 1800, 4800, 700], ['pull', 3500, 4000, 99999, 800],
-    ['sounds/supra/supra_top.wav', 7100, 7700, 9000, 300, 0.7, 0.3]],   // the Supra's turbo/anti-lag, kept in the background
+    ['sounds/supra/supra_top.wav', 7100, 7700, 9000, 300, 1.4, 0.3]],   // the Supra's turbo/anti-lag: quiet on boost, full at the limiter
   pops:4, flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.45, flutterPitch:1.08, coldstart:true, fire:1.75, vol:1.3 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
     const get = n => fetch(n.includes('/') ? n : P.dir + (P.prefix || 'supra_') + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
-    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get(P.flutter === true ? 'flutter' : P.flutter)] : []), ...(P.coldstart ? [get('coldstart')] : P.coldUrl ? [get(P.coldUrl)] : [])]).then(bufs => {
+    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get(P.popFrom ? P.popFrom + i + '.wav' : 'pop' + i)), ...(P.flutter ? [get(P.flutter === true ? 'flutter' : P.flutter)] : []), ...(P.coldstart ? [get('coldstart')] : P.coldUrl ? [get(P.coldUrl)] : [])]).then(bufs => {
       const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; const comp = AC.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; lp.connect(comp); comp.connect(out); out.connect(A.master);
       P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4], vol:l[5] || 1, boost:l[6] || 0, maxRate:l[7] || 3.2}; });
       P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[P.loops.length + P.pops] : null; P.coldBuf = P.coldstart || P.coldUrl ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
@@ -957,10 +992,18 @@ function updateCar(dt){
   // exhaust flame on pops
   // tail lamps: amber flashes while it starts, dim red running lights with the engine on, bright red on the brakes
   if(C.tail && C.tail.length){
-    let col = LAMP_RED, k = 0;
+    let col = LAMP_RED, k = 0, zoned = (C.tailAmber && C.tailAmber.length) || C.tailBand;
     if(S.amberT > 0){ S.amberT -= dt; col = LAMP_AMBER; k = Math.floor(S.amberT/0.32) % 2 === 0 ? 5 : 0; }
     else if(S.engineOn !== false && S.started){ k = S.brk ? 9 : 0.55; }
-    for(const mt of C.tail){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
+    if(zoned && S.amberT > 0){   // only the amber part flashes; the red around it stays lit
+      for(const mt of C.tailAmber){ mt.emissive.copy(LAMP_AMBER); mt.emissiveIntensity = k; }
+      for(const mt of C.tail){ mt.emissive.copy(LAMP_RED); mt.emissiveIntensity = 1.6; }
+      if(C.tailBand) for(const b of C.tailBand) b.z = k;
+    } else {
+      for(const mt of C.tail){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
+      if(zoned) for(const mt of C.tailAmber){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
+      if(C.tailBand) for(const b of C.tailBand) b.z = 0;
+    }
     for(const gm of C.tailGlow){ gm.color.copy(col); gm.opacity = Math.min(1, k/5)*(k > 6 ? 1 : 0.7); }
   }
   if(flameT > 0){ flameT -= dt; const e = C.exhaust.clone().applyMatrix4(car.matrixWorld); flameMesh.position.copy(e); flameMesh.visible = Math.random() > 0.25; flameMesh.scale.setScalar(0.35 + Math.random()*0.35); } else flameMesh.visible = false;
