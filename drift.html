@@ -103,6 +103,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
       <button type="button" data-car="jdm"><b>JDM drift car</b><small>Rear-drive and powerful. Slides on the throttle.</small></button>
       <button type="button" data-car="fortune" hidden><b>VeilSide RX-7</b><small>Han's widebody Fortune. Same rotary, same feel as the RX-7.</small></button>
       <button type="button" data-car="r34" hidden><b>Skyline GT-R R34</b><small>Brian's silver-blue R34, set up rear-drive to slide.</small></button>
+      <button type="button" data-car="eclipse" hidden><b>Mitsubishi Eclipse</b><small>Brian's green '95 Eclipse with the green neon, rear-drive swap.</small></button>
     </div>
     <span class="lbl">Your name</span>
     <div class="row"><input id="nick" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Your name"></div>
@@ -171,9 +172,11 @@ const CARS = { rx7:{ file:'models/drift/rx7.glb', name:'Mazda RX-7', length:4.29
                  wheelMat:/^(ext_tyres|VS_RIM_PLASTIC|VS_RIM_LOGO|VS_RIM_CHROME|VS_RIM_ALUM|ext_ap_disc_hub|ext_ap_disc_front|ext_ap_disc_rear|ext_ap_caliper)$/, tyreMat:/^ext_tyres$/,
                  lampMat:/^tailight$/, lampGlass:/^ext_glass_rear_tinted$/, exhaustMat:/^material$/ },
                r34:{ file:'models/drift/r34.glb', name:'Nissan Skyline GT-R', set:'tokyo', length:4.6, drive:'rwd', power:240000, mass:1500, redline:8000, gears:[3.83, 2.36, 1.69, 1.31, 1.0, 0.79], final:3.9, model:null, neon:0x1e9bff,
-                 wheelMat:/Wheel1A|^material$|riminside|^cal_m$|Calliper/, tyreMat:/^material$/, lampMat:/red_glass/ } };
+                 wheelMat:/Wheel1A|^material$|riminside|^cal_m$|Calliper/, tyreMat:/^material$/, lampMat:/red_glass/ },
+               eclipse:{ file:'models/drift/eclipse.glb', name:'Mitsubishi Eclipse', set:'tokyo', length:4.39, drive:'rwd', power:165000, mass:1300, redline:7500, gears:[3.36, 1.95, 1.36, 1.03, 0.81], final:4.3, model:null, neon:0x2bff5a,
+                 wheelMat:/Wheel1A|^disk$|^fake_disk$/, tyreMat:/Wheel1A/, lampMat:/red_glass/ } };
 // line-ups on the home screen: the originals, and the Tokyo Drift cars
-const SETS = { classic:['rx7', 'integra', 'jdm'], tokyo:['fortune', 'r34'] };
+const SETS = { classic:['rx7', 'integra', 'jdm'], tokyo:['fortune', 'r34', 'eclipse'] };
 const setOf = k => CARS[k] && CARS[k].set || 'classic';
 loader.load('models/drift/track.glb', g => {
   g.scene.traverse(o => { if(o.isMesh){ o.receiveShadow = true; o.castShadow = false; const ms = Array.isArray(o.material) ? o.material : [o.material];
@@ -827,7 +830,7 @@ const ENGINE_VOICE = {
   jdm:{ fire:3, osc:[['sawtooth', 1, 0.5], ['sawtooth', 0.5, 0.5], ['triangle', 1.5, 0.18], ['square', 2, 0.06]], lp:[320, 1900, 0.22], jitter:0.004, vol:1.05 },
   integra:{ fire:2, osc:[['sawtooth', 1, 0.45], ['square', 2, 0.2], ['sawtooth', 0.5, 0.25], ['triangle', 3, 0.15]], lp:[600, 2700, 0.42], jitter:0.006, vol:0.95 },
   rx7:{ fire:2, osc:[['square', 2, 0.32], ['sawtooth', 3, 0.3], ['square', 4, 0.16], ['sawtooth', 1, 0.14]], lp:[900, 3800, 0.55], jitter:0.03, vol:0.85 } };
-ENGINE_VOICE.fortune = ENGINE_VOICE.rx7;
+ENGINE_VOICE.fortune = ENGINE_VOICE.rx7; ENGINE_VOICE.eclipse = ENGINE_VOICE.integra;
 function engineSound(dt){
   if(!A || !C) return;
   const V = ENGINE_VOICE[carKey] || ENGINE_VOICE.jdm;
