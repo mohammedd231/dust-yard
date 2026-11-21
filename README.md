@@ -19,7 +19,7 @@ WASD move · mouse aim · E get in/out of the rowing boat (W paddle, A/D steer, 
 W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam / chase) · R reset to track · Esc pause. Gamepad triggers + left stick work too.
 - Boat: "Boat" by KamillaKraus (https://sketchfab.com/KamillaKraus), CC BY 4.0. Texture recompressed and mesh simplified for the web.
 - Supra engine sound (drift game): clips cut from YouTube videos by @throtclips ("+1000HP Supra ASMR", incl. the cold start), @Pintsandpetrol ("Mk4 Supra Anti-Lag"), @EatSleepShift ("Supra Brutal Antilag Sound Compilation") and @jdmlove8771 ("stutututu supra 2jz"). Not licensed for reuse; replace before any commercial use.
-- RX-7 rotary (drift game): idle and high-rev clips from screen recordings the owner shared; the throttle pull is from "3 rotor Rx7 sound!" by @TBRX2Cars. Same caveat.
+- RX-7 rotary (drift game): idle and high-rev clips from screen recordings the owner shared; revs, anti-lag and bangs are from "1200HP Turbo 4-Rotor RX-7 Start-Up" by @ShafeeqLimbada. Same caveat.
 - Sniper rifle with arms and animations: "sniper animated" by DJMaesen (https://sketchfab.com/bumstrum), CC BY 4.0. Textures recompressed for the web.
 - Market: "Mini market" by Pasha (https://sketchfab.com/Pasha.), CC BY 4.0. Simplified, relettered as a BIM.
 - Slipper: "BOM SLIPPER" by berkayege (https://sketchfab.com/berkayege), CC BY 4.0.
