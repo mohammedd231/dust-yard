@@ -779,12 +779,14 @@ SAMPLES.fortune = SAMPLES.rx7;   // Han's RX-7 sounds exactly like ours
 // Eclipse GSX: its own cold start, idle and a pull through the gears
 SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', loops:[['idle', 900, 0, 2600], ['pull', 2500, 1700, 99999, 800]], pops:0, coldstart:true, fire:2.05, vol:1.3 };
 // R34 GT-R: cold start and idle, a steady cruise, a pull for the top end, and real bangs
-SAMPLES.r34 = { dir:'sounds/r34/', prefix:'r34_', loops:[['idle', 1200, 0, 2500, 600], ['cruise', 2400, 1800, 4800, 700], ['pull', 3500, 4000, 99999, 800]], pops:4, coldstart:true, fire:1.75, vol:1.3 };
+SAMPLES.r34 = { dir:'sounds/r34/', prefix:'r34_', loops:[['idle', 1200, 0, 2500, 600], ['cruise', 2400, 1800, 4800, 700], ['pull', 3500, 4000, 99999, 800],
+    ['sounds/supra/supra_top.wav', 7100, 7700, 9000, 300, 0.7, 0.3]],   // the Supra's turbo/anti-lag, kept in the background
+  pops:4, flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.45, flutterPitch:1.08, coldstart:true, fire:1.75, vol:1.3 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
     const get = n => fetch(n.includes('/') ? n : P.dir + (P.prefix || 'supra_') + n + '.wav').then(r => r.arrayBuffer()).then(b => new Promise((ok, no) => AC.decodeAudioData(b, ok, no)));
-    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get('flutter')] : []), ...(P.coldstart ? [get('coldstart')] : P.coldUrl ? [get(P.coldUrl)] : [])]).then(bufs => {
+    Promise.all([...P.loops.map(l => get(l[0])), ...Array.from({length:P.pops}, (_, i) => get('pop' + i)), ...(P.flutter ? [get(P.flutter === true ? 'flutter' : P.flutter)] : []), ...(P.coldstart ? [get('coldstart')] : P.coldUrl ? [get(P.coldUrl)] : [])]).then(bufs => {
       const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000; const comp = AC.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; lp.connect(comp); comp.connect(out); out.connect(A.master);
       P.layers = P.loops.map((l, i) => { const s = AC.createBufferSource(); s.buffer = bufs[i]; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*bufs[i].duration); return {s, g, base:l[1], lo:l[2], hi:l[3], fade:l[4], vol:l[5] || 1, boost:l[6] || 0, maxRate:l[7] || 3.2}; });
       P.popBufs = bufs.slice(P.loops.length, P.loops.length + P.pops); P.flutterBuf = P.flutter ? bufs[P.loops.length + P.pops] : null; P.coldBuf = P.coldstart || P.coldUrl ? bufs[bufs.length - 1] : null; P.out = out; P.lp = lp; P.ready = true;
@@ -795,7 +797,8 @@ function loadSamples(){
 function flutter(vol){
   const P = SAMPLES[carKey]; if(!P || !P.ready || !P.flutterBuf || AC.currentTime - (P.lastFl || 0) < 0.9) return;
   P.lastFl = AC.currentTime;
-  const s = AC.createBufferSource(); s.buffer = P.flutterBuf; s.playbackRate.value = 0.95 + Math.random()*0.12;
+  vol *= P.flutterVol || 1;
+  const s = AC.createBufferSource(); s.buffer = P.flutterBuf; s.playbackRate.value = (P.flutterPitch || 1)*(0.95 + Math.random()*0.12);
   const g = AC.createGain(); g.gain.value = vol; s.connect(g); g.connect(A.master); s.start();
 }
 /* Cold start: the engine is off when you roll out. The button (or I / Enter) cranks it over: the Supra plays
