@@ -1212,10 +1212,16 @@ function onRemote(p){
   if(r.key !== key){ r.key = key; if(r.car){ scene.remove(r.car.g); r.car = null; } loadCar(key, Cc => { if(NET.remotes.get(r.id) !== r || r.key !== key || r.car) return; r.car = cloneCar(Cc); r.C = Cc; r.car.g.add(r.tag = nameTag(r.name)); scene.add(r.car.g); }); }
   r.tx = clamp(f(p.x, r.x), -3000, 3000); r.ty = f(p.y, r.y); r.tz = clamp(f(p.z, r.z), -3000, 3000); r.th = f(p.h, r.h); r.vx = clamp(f(p.vx, 0), -120, 120); r.vz = clamp(f(p.vz, 0), -120, 120);
   r.st = clamp(f(p.s, 0), -1, 1); r.sl = clamp(f(p.sl, 0), 0, 1); r.best = Math.max(0, f(p.b, 0)|0); r.total = Math.max(0, f(p.tt, 0)|0); r.d = Math.max(0, f(p.d, 0)|0); r.on = !!p.on; r.t = now();
-  r.rpm = clamp(f(p.rpm, 900), 0, 12000); r.th = p.th ? 1 : 0; r.eo = p.eo !== 0;
+  r.rpm = clamp(f(p.rpm, 900), 0, 12000); r.gas = p.th ? 1 : 0; r.eo = p.eo !== 0;   // (r.th is their heading)
 }
 function dropRemote(id){ const r = NET.remotes.get(id); if(!r) return; if(r.car) scene.remove(r.car.g); remoteAudioStop(r); NET.remotes.delete(id); renderRaces(); }
-function remotePop(r){ if(!A) return; const d = r.car.g.position.distanceTo(camera.position); if(d < 60){ const g = A.master.gain.value; A.master.gain.value = g*clamp(1 - d/60, 0.1, 1); _pop(1, 0.4); A.master.gain.value = g; } }
+function remotePop(r){
+  // their bang comes out of their car (3D, through their own engine's panner); our car shows no flame for it
+  if(!A || !AC || !r.audio) return;
+  const P = SAMPLES[r.key], bufs = P && P.ready && P.popBufs; if(!bufs || !bufs.length) return;
+  for(let k = 0; k < 2; k++) setTimeout(() => { if(!r.audio) return; const s = AC.createBufferSource(); s.buffer = bufs[Math.random()*bufs.length|0]; s.playbackRate.value = 0.9 + Math.random()*0.25;
+    const g = AC.createGain(); g.gain.value = 0.8; s.connect(g); g.connect(r.audio.pan); s.start(); }, k*(50 + Math.random()*60));
+}
 /* Other players' engines: each nearby car gets its own copy of its engine sound, placed in 3D where the car is,
    so it's loud close by, fades with distance and sits left or right of you. Same recordings as when you drive it. */
 function setListener(){
@@ -1245,8 +1251,8 @@ function remoteAudio(r, dt){
       const fade = L.fade || (L.hi - L.lo)*0.3, a = i === 0 ? 1 : (rpm - L.lo)/fade, b = i === R.srcs.length - 1 ? 1 : (L.hi - rpm)/fade;
       q.g.gain.setTargetAtTime(Math.sin(Math.PI/2*clamp(Math.min(a, b, 1), 0, 1))*L.vol, t, 0.05); });
   else R.srcs.forEach(q => q.s.frequency.setTargetAtTime(rpm/60*q.fire*q.mul/2, t, 0.03));
-  R.lp.frequency.setTargetAtTime(r.th ? 7000 : 2200, t, 0.08);
-  R.out.gain.setTargetAtTime((0.5 + 0.5*(r.th || 0))*(R.rec ? (P.vol || 1) : 0.35)*(V_VOL()), t, 0.05);
+  R.lp.frequency.setTargetAtTime(r.gas ? 7000 : 2200, t, 0.08);
+  R.out.gain.setTargetAtTime((0.5 + 0.5*(r.gas || 0))*(R.rec ? (P.vol || 1) : 0.35)*(V_VOL()), t, 0.05);
 }
 const V_VOL = () => 0.9;
 function netTick(dt){
