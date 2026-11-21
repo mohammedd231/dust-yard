@@ -137,7 +137,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.6';
+const BUILD = '2026-11-21.7';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
@@ -621,7 +621,8 @@ function showroomTick(){
     const Cc = CARS[k]; if(!Cc.model || SHOW.cars[k]) continue;
     const g = cloneCar(Cc).g, p = showSlot(k); g.position.set(p.x, hAt(p.x, p.z), p.z); g.rotation.set(0, p.h, 0); scene.add(g); SHOW.cars[k] = g;
   }
-  for(const k in SHOW.cars) SHOW.cars[k].visible = !S.started || (S.intro > 0 && k !== carKey);
+  // the parked line-up only stays during the solo start sweep; online you start on the grid, where it would overlap you
+  for(const k in SHOW.cars) SHOW.cars[k].visible = !S.started || (!NET.game && S.intro > 0 && k !== carKey);
   if(car) car.visible = S.started;
 }
 function showroomCamera(t){
@@ -794,6 +795,8 @@ function step(dt){
     if(!reverse && vx0 >= 0 && vx < 0) vx = 0;
     vy += (ay - vx*r)*h*kin; r += rd*h*kin;
     if(kin < 1){ r = lerp(vx/Lw*Math.tan(S.steer), r, kin); vy *= Math.exp(-h*8*(1 - kin)); }
+    // reversing: the car just follows its wheels backwards (no tyre slip, no sliding about)
+    if(vx < -0.2){ r = vx/Lw*Math.tan(S.steer); vy *= Math.exp(-h*12); S.driftMode = false; }
     if(sp < 0.3 && !thr && !reverse) vx *= Math.exp(-h*3);
     // a little help holding long drifts on a keyboard: yaw doesn't run away
     r *= Math.exp(-h*0.35);
