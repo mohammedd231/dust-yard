@@ -31,10 +31,10 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px
 html.touch .ign small{display:none}
 html.touch .ign{bottom:auto;top:calc(26% + env(safe-area-inset-top,0px));padding:10px 24px;font-size:16px}
 @keyframes ignPulse{50%{box-shadow:0 0 44px rgba(255,70,30,.8)}}
-.dash{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--panel);border:1px solid var(--line);padding:12px 16px;min-width:280px;display:grid;grid-template-columns:1fr auto;gap:2px 18px;align-items:end}
+.dash{position:absolute;right:calc(max(16px,env(safe-area-inset-right,0px)) + min(230px,30vh) + 4px);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--panel);border:1px solid var(--line);padding:12px 16px;min-width:280px;display:grid;grid-template-columns:1fr auto;gap:2px 18px;align-items:end}
 .dash .spd{font-family:var(--display);font-weight:800;font-size:64px;line-height:.9}
 .dash .gear{font-family:var(--display);font-weight:800;font-size:56px;line-height:.9;color:var(--amber);text-align:right}
-.rpm{grid-column:1/-1;display:grid;grid-template-columns:repeat(16,1fr);gap:3px;margin-top:8px}
+.rpm{display:none !important;grid-column:1/-1;grid-template-columns:repeat(16,1fr);gap:3px;margin-top:8px}
 .rpm i{height:8px;background:rgba(235,236,240,.12)}
 .rpm i.on{background:var(--green)} .rpm i.on.y{background:var(--amber)} .rpm i.on.r{background:#ff3b2f}
 .score{position:absolute;top:calc(18px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);text-align:center}
@@ -79,7 +79,7 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
 .load{height:3px;background:rgba(235,236,240,.1)} .load i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 @media (max-width:600px){.board{display:none}.score .cur{font-size:40px}}
 /* phones: the speed panel moves to the bottom middle, between the steering and pedal buttons */
-html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:calc(env(safe-area-inset-right,0px) + 74px);transform:scale(.5);transform-origin:top right;min-width:260px}
+html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:calc(env(safe-area-inset-right,0px) + min(140px,34vh) + 68px);transform:scale(.5);transform-origin:top right;min-width:260px}
 </style>
 </head>
 <body>
@@ -143,6 +143,34 @@ $('stage').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const FOGC = 0xb9c6d1; scene.fog = new THREE.Fog(FOGC, 120, 650);
 const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 2500);
+/* Tachometer: a real 0-10k gauge drawn in its own little scene in the corner, needle on the live revs */
+const TACH = { scene:new THREE.Scene(), cam:new THREE.PerspectiveCamera(24, 1, 0.1, 400), needle:null, rpm:0 };
+TACH.scene.add(new THREE.HemisphereLight(0xffffff, 0x50525a, 1.1)); { const d = new THREE.DirectionalLight(0xffffff, 0.9); d.position.set(0.3, 0.6, 1); TACH.scene.add(d); }
+new THREE.GLTFLoader().load('models/hud/tachometer.glb', g => {
+  const m = g.scene; m.updateMatrixWorld(true);
+  const byMat = re => { let r = null; m.traverse(o => { if(!r && o.isMesh && re.test(o.material && o.material.name || '')) r = o; }); return r; };
+  const needle = byMat(/^mat0__Instance__6$/), hub = byMat(/^mat0__Instance__13$/), face = byMat(/^mat16$/);
+  const box = new THREE.Box3().setFromObject(face || m), c = box.getCenter(new V3()), hc = hub ? new THREE.Box3().setFromObject(hub).getCenter(new V3()) : c;
+  if(needle){ const pv = new THREE.Group(); pv.position.set(hc.x, hc.y, 0); m.add(pv); pv.updateMatrixWorld(true); pv.attach(needle); TACH.needle = pv; }
+  m.traverse(o => { if(o.isMesh){ o.frustumCulled = false; } });
+  TACH.scene.add(m); const all = new THREE.Box3().setFromObject(m), sz = all.getSize(new V3());
+  // look straight at the dial face (it faces +z)
+  const d = Math.max(sz.x, sz.y)*0.5/Math.tan(THREE.MathUtils.degToRad(12))*1.02;
+  TACH.cam.position.set(c.x + 0.6, c.y, all.max.z + d); TACH.cam.lookAt(c.x + 0.6, c.y, c.z);
+});
+// the dial reads 0 at bottom right and 10 at top right, clockwise, 22.5 degrees per 1000 rpm; the model ships with the needle near 10
+function tachAngle(rpm){ return -THREE.MathUtils.degToRad((clamp(rpm, 0, 10000)/1000 - TACH.zero)*22.5); }
+TACH.zero = 9.8;
+function tachRender(dt){
+  if(!TACH.needle || !S.started || $('hud').hidden) return;
+  TACH.rpm += ((S.engineOn === false ? 0 : S.rpm) - TACH.rpm)*Math.min(1, dt*14); if(TACH.fixed != null) TACH.rpm = TACH.fixed;
+  TACH.needle.rotation.z = tachAngle(TACH.rpm);
+  const touch = document.documentElement.classList.contains('touch'), sz = touch ? Math.min(140, innerHeight*0.34) : Math.min(230, innerHeight*0.3);
+  const x = innerWidth - sz - (touch ? 64 : 10), y = touch ? innerHeight - sz - 4 : 8;   // on phones: top right, beside the pause button
+  renderer.autoClear = false; renderer.setScissorTest(true); renderer.setViewport(x, y, sz, sz); renderer.setScissor(x, y, sz, sz);
+  renderer.clearDepth(); renderer.render(TACH.scene, TACH.cam);
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight); renderer.autoClear = true;
+}
 function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 scene.add(new THREE.HemisphereLight(0xdfe9f5, 0x4a4234, 0.85));
@@ -1213,6 +1241,7 @@ function frame(){
     else showroomCamera(t);
   }
   renderer.render(scene, camera);
+  tachRender(dt);
 }
 camera.position.set(200, 120, 200); camera.lookAt(230, 0, -80);
 frame();
