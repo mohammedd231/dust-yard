@@ -1044,6 +1044,14 @@ function updateCar(dt){
 }
 const camPos = new V3(), camLook = new V3();
 const TOUCH_CAM = !!(window.TOUCH && TOUCH.isTouch);
+const LOOK = { yaw:0, pitch:0, t:0 };
+function lookBy(dx, dy){ LOOK.yaw = Math.atan2(Math.sin(LOOK.yaw - dx*0.008), Math.cos(LOOK.yaw - dx*0.008)); LOOK.pitch = clamp(LOOK.pitch + dy*0.005, -0.15, 1.1); LOOK.t = now(); }
+{ // mouse: drag anywhere on the game to look around
+  let id = null, lx = 0, ly = 0;
+  addEventListener('pointerdown', e => { if(e.pointerType === 'touch' || !S.started || S.paused || (e.target.closest && e.target.closest('button, input, a, #menu, .tc, .ign'))) return; id = e.pointerId; lx = e.clientX; ly = e.clientY; });
+  addEventListener('pointermove', e => { if(e.pointerId !== id) return; lookBy(e.clientX - lx, e.clientY - ly); lx = e.clientX; ly = e.clientY; });
+  const up = e => { if(e.pointerId === id) id = null; }; addEventListener('pointerup', up); addEventListener('pointercancel', up);
+}
 function positionCamera(dt, snap){
   if(!car) return;
   car.updateMatrixWorld(true);
@@ -1056,10 +1064,15 @@ function positionCamera(dt, snap){
     const v = Math.hypot(S.vx, S.vz), fx = Math.sin(S.h), fz = Math.cos(S.h);
     let dx = fx, dz = fz; if(v > 5){ const mx = S.vx/v, mz = S.vz/v; dx = lerp(fx, mx, 0.55); dz = lerp(fz, mz, 0.55); const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
     const PH = TOUCH_CAM, cd = PH ? 4.9 : 6.2;
-    const want = new V3(S.x - dx*cd, S.y + (PH ? 1.9 : 2.3), S.z - dz*cd);
+    // look around: drag to swing the camera round the car; let go and it eases back behind
+    if(now() - LOOK.t > 1.3){ LOOK.yaw *= Math.exp(-dt*3); LOOK.pitch *= Math.exp(-dt*3); }
+    const look = Math.min(1, Math.abs(LOOK.yaw)*2 + Math.abs(LOOK.pitch)*2), cy = Math.cos(LOOK.yaw), sy = Math.sin(LOOK.yaw);
+    const bx = dx*cy - dz*sy, bz = dx*sy + dz*cy, cdl = cd*Math.cos(LOOK.pitch);
+    const want = new V3(S.x - bx*cdl, S.y + (PH ? 1.9 : 2.3) + cd*Math.sin(LOOK.pitch), S.z - bz*cdl);
     want.y = Math.max(want.y, hAt(want.x, want.z) + 0.8);
-    const k = snap ? 1 : 1 - Math.exp(-dt*5);
-    camPos.lerp(want, k); camLook.lerp(new V3(S.x + fx*2, S.y + 0.9, S.z + fz*2), snap ? 1 : 1 - Math.exp(-dt*10));
+    const k = snap ? 1 : 1 - Math.exp(-dt*(look > 0.05 ? 12 : 5));
+    const lookAt = new V3(S.x + fx*2, S.y + 0.9, S.z + fz*2).lerp(new V3(S.x, S.y + 0.8, S.z), look);
+    camPos.lerp(want, k); camLook.lerp(lookAt, snap ? 1 : 1 - Math.exp(-dt*10));
     camera.position.copy(camPos); camera.lookAt(camLook); camera.near = 0.1;
   }
   const fov = (camMode === 1 ? 70 : TOUCH_CAM ? 52 : 62) + Math.min(10, Math.hypot(S.vx, S.vz)*0.12);
@@ -1173,7 +1186,7 @@ function gridSlot(){ for(let k = 0; k < MAX_CARS; k++){ const x = GRID.x + (k % 
 function sendState(){
   if(!NET.game || !NET.live) return;
   const r2 = v => Math.round(v*100)/100;
-  const pl = {v:1, id:NET.id, n:myName, c:carKey, x:r2(S.x), y:r2(S.y), z:r2(S.z), h:Math.round(S.h*1000)/1000, s:r2(S.steer), vx:r2(S.vx), vz:r2(S.vz), sl:r2(S.slipR), rpm:Math.round(S.rpm), b:S.best, tt:S.total, d:Math.round(S.drift), on:S.started && !S.paused ? 1 : 0};
+  const pl = {v:1, id:NET.id, n:myName, c:carKey, x:r2(S.x), y:r2(S.y), z:r2(S.z), h:Math.round(S.h*1000)/1000, s:r2(S.steer), vx:r2(S.vx), vz:r2(S.vz), sl:r2(S.slipR), rpm:Math.round(S.rpm), th:S.thr ? 1 : 0, eo:S.engineOn === false ? 0 : 1, b:S.best, tt:S.total, d:Math.round(S.drift), on:S.started && !S.paused ? 1 : 0};
   try{ const p = NET.game.send({type:'broadcast', event:'st', payload:pl}); if(p && p.catch) p.catch(() => {}); }catch(e){}
 }
 const _pop = pop; pop = function(n, v){ _pop(n, v); if(NET.game && NET.live) try{ const p = NET.game.send({type:'broadcast', event:'pop', payload:{id:NET.id}}); if(p && p.catch) p.catch(() => {}); }catch(e){} };
@@ -1192,10 +1205,45 @@ function onRemote(p){
   if(r.key !== key){ r.key = key; if(r.car){ scene.remove(r.car.g); r.car = null; } loadCar(key, Cc => { if(NET.remotes.get(r.id) !== r || r.key !== key || r.car) return; r.car = cloneCar(Cc); r.C = Cc; r.car.g.add(r.tag = nameTag(r.name)); scene.add(r.car.g); }); }
   r.tx = clamp(f(p.x, r.x), -3000, 3000); r.ty = f(p.y, r.y); r.tz = clamp(f(p.z, r.z), -3000, 3000); r.th = f(p.h, r.h); r.vx = clamp(f(p.vx, 0), -120, 120); r.vz = clamp(f(p.vz, 0), -120, 120);
   r.st = clamp(f(p.s, 0), -1, 1); r.sl = clamp(f(p.sl, 0), 0, 1); r.best = Math.max(0, f(p.b, 0)|0); r.total = Math.max(0, f(p.tt, 0)|0); r.d = Math.max(0, f(p.d, 0)|0); r.on = !!p.on; r.t = now();
+  r.rpm = clamp(f(p.rpm, 900), 0, 12000); r.th = p.th ? 1 : 0; r.eo = p.eo !== 0;
 }
-function dropRemote(id){ const r = NET.remotes.get(id); if(!r) return; if(r.car) scene.remove(r.car.g); NET.remotes.delete(id); renderRaces(); }
+function dropRemote(id){ const r = NET.remotes.get(id); if(!r) return; if(r.car) scene.remove(r.car.g); remoteAudioStop(r); NET.remotes.delete(id); renderRaces(); }
 function remotePop(r){ if(!A) return; const d = r.car.g.position.distanceTo(camera.position); if(d < 60){ const g = A.master.gain.value; A.master.gain.value = g*clamp(1 - d/60, 0.1, 1); _pop(1, 0.4); A.master.gain.value = g; } }
+/* Other players' engines: each nearby car gets its own copy of its engine sound, placed in 3D where the car is,
+   so it's loud close by, fades with distance and sits left or right of you. Same recordings as when you drive it. */
+function setListener(){
+  const L = AC.listener, p = camera.position, f = new V3(0, 0, -1).applyQuaternion(camera.quaternion), u = new V3(0, 1, 0).applyQuaternion(camera.quaternion);
+  if(L.positionX){ const t = AC.currentTime; L.positionX.setValueAtTime(p.x, t); L.positionY.setValueAtTime(p.y, t); L.positionZ.setValueAtTime(p.z, t);
+    L.forwardX.setValueAtTime(f.x, t); L.forwardY.setValueAtTime(f.y, t); L.forwardZ.setValueAtTime(f.z, t); L.upX.setValueAtTime(u.x, t); L.upY.setValueAtTime(u.y, t); L.upZ.setValueAtTime(u.z, t); }
+  else { L.setPosition(p.x, p.y, p.z); L.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z); }
+}
+function remoteAudioStop(r){ const R = r.audio; if(!R) return; r.audio = null; try{ R.srcs.forEach(q => q.s.stop()); R.out.disconnect(); }catch(e){} }
+function remoteAudio(r, dt){
+  if(!A || !AC) return;
+  const d = r.car.g.position.distanceTo(camera.position), live = r.on && r.eo !== false && r.car.g.visible && d < 220;
+  if(!live){ remoteAudioStop(r); return; }
+  const P = SAMPLES[r.key], t = AC.currentTime, Cc = CARS[r.key];
+  if(!r.audio || r.audio.key !== r.key || r.audio.rec !== !!(P && P.ready)){
+    remoteAudioStop(r);
+    const pan = AC.createPanner(); pan.panningModel = 'equalpower'; pan.distanceModel = 'inverse'; pan.refDistance = 6; pan.rolloffFactor = 1.15; pan.maxDistance = 400;
+    const out = AC.createGain(); out.gain.value = 0; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5000; lp.connect(out); out.connect(pan); pan.connect(A.master);
+    const srcs = [];
+    if(P && P.ready) P.layers.forEach(L => { const s = AC.createBufferSource(); s.buffer = L.s.buffer; s.loop = true; const g = AC.createGain(); g.gain.value = 0; s.connect(g); g.connect(lp); s.start(0, Math.random()*s.buffer.duration); srcs.push({s, g, L}); });
+    else { const V = ENGINE_VOICE[r.key] || ENGINE_VOICE.jdm; V.osc.slice(0, 2).forEach(([type, mul, amp]) => { const s = AC.createOscillator(); s.type = type; const g = AC.createGain(); g.gain.value = amp*0.5; s.connect(g); g.connect(lp); s.start(); srcs.push({s, g, mul, fire:V.fire}); }); }
+    r.audio = {key:r.key, rec:!!(P && P.ready), pan, out, lp, srcs};
+  }
+  const R = r.audio, rpm = Math.max(800, r.rpm || 900);
+  if(R.pan.positionX){ R.pan.positionX.setTargetAtTime(r.x, t, 0.03); R.pan.positionY.setTargetAtTime(r.y + 0.5, t, 0.03); R.pan.positionZ.setTargetAtTime(r.z, t, 0.03); } else R.pan.setPosition(r.x, r.y + 0.5, r.z);
+  if(R.rec) R.srcs.forEach((q, i) => { const L = q.L; q.s.playbackRate.setTargetAtTime(clamp(rpm/L.base, 0.5, L.maxRate), t, 0.03);
+      const fade = L.fade || (L.hi - L.lo)*0.3, a = i === 0 ? 1 : (rpm - L.lo)/fade, b = i === R.srcs.length - 1 ? 1 : (L.hi - rpm)/fade;
+      q.g.gain.setTargetAtTime(Math.sin(Math.PI/2*clamp(Math.min(a, b, 1), 0, 1))*L.vol, t, 0.05); });
+  else R.srcs.forEach(q => q.s.frequency.setTargetAtTime(rpm/60*q.fire*q.mul/2, t, 0.03));
+  R.lp.frequency.setTargetAtTime(r.th ? 7000 : 2200, t, 0.08);
+  R.out.gain.setTargetAtTime((0.5 + 0.5*(r.th || 0))*(R.rec ? (P.vol || 1) : 0.35)*(V_VOL()), t, 0.05);
+}
+const V_VOL = () => 0.9;
 function netTick(dt){
+  if(A && AC && NET.remotes.size) setListener();
   if(!NET.game) return;
   const t = now();
   NET.sendT -= dt; if(NET.sendT <= 0){ NET.sendT = S.started && !S.paused ? 1/12 : 0.5; sendState(); }
@@ -1210,6 +1258,7 @@ function netTick(dt){
     r.car.g.position.set(r.x, r.y, r.z); r.car.g.rotation.set(0, r.h, 0);
     const vf = r.vx*Math.sin(r.h) + r.vz*Math.cos(r.h);
     for(const w of r.car.wheels){ w.spin.rotation.x += vf*dt/0.3; if(w.front) w.steer.rotation.y = r.st; }
+    remoteAudio(r, dt);
     // their smoke
     if(r.sl > 0.35 && Math.hypot(r.vx, r.vz) > 4 && Math.random() < r.sl){ const fx = Math.sin(r.h), fz = Math.cos(r.h); const p = new V3(r.x - fx*1.25, r.y + 0.25, r.z - fz*1.25); puff(p, r.sl); }
     // contact: push ourselves out of their car
@@ -1252,7 +1301,7 @@ camera.position.set(200, 120, 200); camera.lookAt(230, 0, -80);
 frame();
 
 /* ---------- phone / tablet controls ---------- */
-if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ buttons:[
+if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ look:(dx, dy) => lookBy(dx*1.3, dy*1.3), buttons:[
   { label:'◀', x:'l0', y:'b0', size:'md', wide:true, code:'KeyA' },
   { label:'▶', x:'l1', y:'b0', size:'md', wide:true, code:'KeyD' },
   { label:'Gas', x:'r0', y:'b0', size:'md', wide:true, code:'KeyW' },
