@@ -78,7 +78,12 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
 .races .r{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);padding:6px 6px 6px 12px}
 .races small{color:var(--muted)}
 .status{color:var(--muted);margin:0;font-size:12px}
-.splash{position:fixed;inset:0;z-index:50;background:#05060c url(img/drift-splash.jpg?v=3) center 38%/cover no-repeat;display:flex;align-items:flex-end;justify-content:center;transition:opacity .6s}
+.splash{position:fixed;inset:0;z-index:50;background:#05060c;display:flex;align-items:flex-end;justify-content:center;transition:opacity .6s;overflow:hidden}
+/* the poster is 1269x671: show it no bigger than that (sharp), over a blurred copy that fills the rest of the screen */
+.splash::before{content:'';position:absolute;inset:-40px;background:url(img/drift-splash.jpg?v=3) center/cover no-repeat;filter:blur(28px) brightness(.55) saturate(1.2)}
+.splash .art{position:absolute;left:50%;top:50%;transform:translate(-50%,-54%);width:min(1269px,100vw);max-height:92vh;aspect-ratio:1269/671;background:url(img/drift-splash.jpg?v=3) center/contain no-repeat;
+  -webkit-mask:radial-gradient(ellipse 75% 75% at 50% 50%,#000 70%,transparent 100%);mask:radial-gradient(ellipse 75% 75% at 50% 50%,#000 70%,transparent 100%)}
+@media (max-aspect-ratio:1269/671){ .splash .art{width:100vw} }
 .splash.done{opacity:0;pointer-events:none}
 .splash::after{content:'';position:absolute;inset:auto 0 0 0;height:34%;background:linear-gradient(transparent,rgba(5,6,12,.9));pointer-events:none}
 .splash-bot{position:relative;z-index:1;width:min(560px,82vw);margin-bottom:calc(5vh + env(safe-area-inset-bottom,0px));text-align:center}
@@ -98,7 +103,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
   <div class="board" id="board"><div class="lbl" id="boardHd">Drift score</div><ol id="boardList"></ol></div>
   <div class="dash"><div><span class="spd" id="spd">0</span> <span class="lbl">km/h</span></div><div class="gear" id="gear">N</div><div class="rpm" id="rpm"></div></div>
 </div>
-<div id="splash" class="splash"><div class="splash-bot"><div class="splash-bar"><i id="splashBar"></i></div><p id="splashTxt">Loading…</p></div></div>
+<div id="splash" class="splash"><div class="art"></div><div class="splash-bot"><div class="splash-bar"><i id="splashBar"></i></div><p id="splashTxt">Loading…</p></div></div>
 <button id="ignBtn" class="ign" type="button" hidden>Cold start<small>Press I or Enter · then hold Enter to rev</small></button>
 <div id="menu">
   <div class="card">
@@ -147,7 +152,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.14';
+const BUILD = '2026-11-21.15';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
