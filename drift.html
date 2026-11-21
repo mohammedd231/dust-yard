@@ -291,6 +291,8 @@ function neonRearTex(){
     im.data.set([255, 255, 255, Math.round(255*clamp(a*1.1, 0, 1))], (j*128 + i)*4); }
   g.putImageData(im, 0, 0); NEON_REAR = new THREE.CanvasTexture(c); return NEON_REAR;
 }
+let GLOW = null;
+function glowTex(){ if(GLOW) return GLOW; const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); GLOW = new THREE.CanvasTexture(c); return GLOW; }
 function prepCar(C, m){
   // give every material reflections; painted body panels are a clear-coated dielectric, not bare metal
   m.traverse(o => { if(!o.isMesh) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(mt => {
@@ -298,6 +300,8 @@ function prepCar(C, m){
     if(/^body$|paint/i.test(mt.name || '') && mt.metalness > 0.5 && !mt.metalnessMap){ mt.metalness = 0.35; mt.roughness = Math.min(mt.roughness, 0.3); }
     // opaque black 'glass' (the RX-7 ships its windows like that): make it real tinted glass you can see through
     if(/glass|window/i.test(mt.name || '') && !mt.transparent && !mt.map){ mt.transparent = true; mt.opacity = 0.3; mt.depthWrite = false; mt.roughness = 0.05; mt.metalness = 0; }
+    // lamp covers: clear, so the lit lamp behind shows through
+    if(/lightglass|lamp.?glass|lens/i.test(mt.name || '')){ mt.transparent = true; mt.opacity = 0.12; mt.depthWrite = false; mt.roughness = 0.05; mt.metalness = 0; if(mt.transmission) mt.transmission = 0; }
     mt.needsUpdate = true; }); });
   // drop display stands / ground planes that came with the model (big and flat)
   m.updateMatrixWorld(true);
@@ -388,6 +392,44 @@ function prepCar(C, m){
         const sz = new THREE.Box3().setFromObject(h.object).getSize(new V3()); if(Math.max(sz.x, sz.y, sz.z) > 1.6) break;
         hide.add(h.object); break; } }
     hide.forEach(o => { o.visible = false; }); C.hidden = hide.size; }
+  // tail lamps: the model's own rear lamp geometry glows, so every car keeps its real lamp shape.
+  // Some models (the Integra) keep front and rear lamps in one mesh: cut those in half and only light the back.
+  { root.updateMatrixWorld(true); C.tail = [];
+    const lampRe = /brakelamp|tail.?lights?|lighta/i, cand = [];
+    root.traverse(o => { if(o.isMesh && lampRe.test(o.material && o.material.name || '')) cand.push(o); });
+    for(const o of cand){
+      const b = new THREE.Box3().setFromObject(o); if(b.min.z > 0) continue;   // all at the front: those are headlights
+      let rear = o;
+      if(b.min.z < -0.5 && b.max.z > 0.5){
+        const g0 = o.geometry, pa = g0.attributes.position, nrm = pa.normalized ? (pa.array instanceof Int16Array ? 32767 : pa.array instanceof Uint16Array ? 65535 : pa.array instanceof Int8Array ? 127 : 255) : 1;
+        const idx = g0.index ? g0.index.array : Array.from({length:pa.count}, (_, i) => i), front = [], back = [], v = new V3(); o.updateMatrixWorld(true);
+        for(let t = 0; t < idx.length; t += 3){ let cz = 0; for(let k = 0; k < 3; k++){ v.fromBufferAttribute(pa, idx[t + k]).divideScalar(nrm); o.localToWorld(v); cz += v.z; } (cz/3 < 0 ? back : front).push(idx[t], idx[t + 1], idx[t + 2]); }
+        if(!back.length) continue;
+        const gb = new THREE.BufferGeometry(); for(const k in g0.attributes) gb.setAttribute(k, g0.attributes[k]); gb.setIndex(back);
+        const gf = new THREE.BufferGeometry(); for(const k in g0.attributes) gf.setAttribute(k, g0.attributes[k]); gf.setIndex(front);
+        o.geometry = gf; rear = new THREE.Mesh(gb, o.material); rear.position.copy(o.position); rear.quaternion.copy(o.quaternion); rear.scale.copy(o.scale); rear.name = (o.name || 'lamp') + '_rear'; o.parent.add(rear);
+      }
+      const mt = rear.material.clone(); if(!mt.emissive) continue;
+      mt.emissive = new THREE.Color(0, 0, 0); mt.emissiveMap = mt.map || null; mt.emissiveIntensity = 0; mt.toneMapped = false; mt.needsUpdate = true; rear.material = mt; rear.userData.tailLamp = true; C.tail.push(mt);
+    }
+    // a soft glow just behind each lamp cluster (left and right) so the lamps read as lit from a distance
+    root.updateMatrixWorld(true); C.tailGlow = [];
+    const tb = new THREE.Box3(); root.traverse(o => { if(o.userData.tailLamp) tb.expandByObject(o); });
+    if(!tb.isEmpty()){ const w = tb.max.x - tb.min.x, ys = (tb.min.y + tb.max.y)/2;
+      for(const x of w > 0.6 ? [tb.min.x + 0.12*w, tb.max.x - 0.12*w] : [(tb.min.x + tb.max.x)/2]){
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex(), color:0xff2018, transparent:true, opacity:0, depthWrite:false, blending:THREE.AdditiveBlending, toneMapped:false}));
+        sp.position.set(x, ys, tb.min.z - 0.05); sp.scale.set(0.85, 0.45, 1); sp.userData.tailGlow = true; root.add(sp); C.tailGlow.push(sp.material); } }
+  }
+  // exhaust tips: the back end of the model's own exhaust pipes (one or two outlets)
+  { root.updateMatrixWorld(true); const pts = [], v = new V3();
+    root.traverse(o => { if(!o.isMesh || !/exhaust|muffl/i.test(o.material && o.material.name || '')) return;
+      const pa = o.geometry.attributes.position, nrm = pa.normalized ? (pa.array instanceof Int16Array ? 32767 : pa.array instanceof Uint16Array ? 65535 : pa.array instanceof Int8Array ? 127 : 255) : 1;
+      o.updateMatrixWorld(true); for(let i = 0; i < pa.count; i += Math.max(1, pa.count/20000|0)){ v.fromBufferAttribute(pa, i).divideScalar(nrm); o.localToWorld(v); pts.push(v.clone()); } });
+    C.exhaustPts = [];
+    if(pts.length){ const zmin = Math.min(...pts.map(p => p.z)), tip = pts.filter(p => p.z < zmin + 0.07);
+      for(const side of [-1, 0, 1]){ const g = tip.filter(p => side < 0 ? p.x < -0.12 : side > 0 ? p.x > 0.12 : Math.abs(p.x) <= 0.12); if(g.length > 3){ const c = new V3(); g.forEach(p => c.add(p)); c.divideScalar(g.length); C.exhaustPts.push(c); } } }
+    if(!C.exhaustPts.length) C.exhaustPts.push(C.exhaust.clone()); else C.exhaust = C.exhaustPts[0].clone();
+  }
   // neon underglow: a glow on the ground under the car plus a light strip along each sill
   { // a model's own flat glow sheet is replaced by ours (it sits under the road); its neon tubes stay
     const sheets = []; root.traverse(o => { if(o.isMesh && /neon/i.test(o.material && o.material.name || '')){ const z = new THREE.Box3().setFromObject(o).getSize(new V3()); if(z.y < 0.02) sheets.push(o); } }); sheets.forEach(o => o.parent.remove(o));
@@ -418,6 +460,8 @@ function cloneCar(C){
   const path = (root, node) => { const p = []; for(let q = node; q && q !== root; q = q.parent) p.unshift(q.parent.children.indexOf(q)); return p; };
   const at = (root, p) => p.reduce((o, i) => o.children[i], root);
   C.wheels.forEach(w => { const s = at(r, path(C.model, w.steer)); wheels.push({steer:s, spin:s.children[0], front:w.front}); });
+  // its own lamp materials, so it doesn't light up when you brake
+  r.traverse(o => { if(o.userData.tailLamp){ o.material = o.material.clone(); o.material.emissiveIntensity = 0; } if(o.userData.tailGlow){ o.material = o.material.clone(); o.material.opacity = 0; } });
   return {g:r, wheels};
 }
 
@@ -725,7 +769,7 @@ function coldStart(){
   if(P && !P.ready && !P.failed && (S.waitN = (S.waitN || 0) + 1) < 40){ $('ignBtn').firstChild.textContent = 'Loading…'; setTimeout(coldStart, 100); return; }   // give the recordings a moment to arrive
   S.waitN = 0;
   const buf = P && P.ready && P.coldBuf, fire = 1.7;
-  S.starting = 1; $('ignBtn').classList.add('busy'); $('ignBtn').firstChild.textContent = 'Starting…';
+  S.starting = 1; S.amberT = (buf ? fire : 1.3) + 1.2; $('ignBtn').classList.add('busy'); $('ignBtn').firstChild.textContent = 'Starting…';
   if(AC){
     const src = AC.createBufferSource(), g = AC.createGain(); g.gain.value = 1.15;
     // hand over to the live engine during the flare, so the recording's own drop to idle is never heard
@@ -736,6 +780,7 @@ function coldStart(){
   setTimeout(() => {
     S.engineOn = true; S.starting = 0; S.engGain = buf ? -0.35 : 0.3;   // live engine comes up under the recording's flare and takes over
     S.coldFrom = buf ? 1150 : 1500; S.coldPeak = buf ? 1450 : 2100; S.coldT = 0; S.rpm = S.coldFrom;
+    for(let i = 0; i < 7; i++) setTimeout(() => exhPuff(1.3), i*45);   // the first cough of smoke
     $('ignBtn').hidden = true; $('ignBtn').classList.remove('busy'); $('ignBtn').firstChild.textContent = 'Cold start';
   }, (buf ? fire : 1.3)*1000);
 }
@@ -818,6 +863,17 @@ function crash(v){
 const smokeTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
 const SMOKE = []; for(let i = 0; i < 140; i++){ const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, color:0xe9ecef, transparent:true, opacity:0, depthWrite:false})); sp.visible = false; scene.add(sp); SMOKE.push({sp, life:0, v:new V3()}); }
 let smokeI = 0;
+// thin exhaust smoke (cold start): small, slow, drifting back and up
+const EXH = []; for(let i = 0; i < 70; i++){ const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, color:0xd4d8dd, transparent:true, opacity:0, depthWrite:false})); sp.visible = false; scene.add(sp); EXH.push({sp, life:0, v:new V3(), k:1}); }
+let exhI = 0;
+function exhPuff(k){ if(!car || !C || !C.exhaustPts) return; const fx = Math.sin(S.h), fz = Math.cos(S.h);
+  for(const e of C.exhaustPts){ const P = EXH[exhI++ % EXH.length], w = e.clone(); car.localToWorld(w); P.sp.position.copy(w); P.sp.visible = true; P.life = 1; P.k = k;
+    P.v.set(-fx*(0.5 + Math.random()*0.5) + (Math.random() - 0.5)*0.25, 0.18 + Math.random()*0.25, -fz*(0.5 + Math.random()*0.5) + (Math.random() - 0.5)*0.25); P.sp.scale.setScalar(0.12); } }
+function exhTick(dt){ for(const P of EXH){ if(P.life <= 0) continue; P.life -= dt*0.38; P.sp.position.addScaledVector(P.v, dt); P.v.multiplyScalar(Math.exp(-dt*0.6)); P.v.y += dt*0.12; P.sp.scale.setScalar(0.12 + (1 - P.life)*1.5); P.sp.material.opacity = Math.max(0, P.life)*0.32*P.k; if(P.life <= 0) P.sp.visible = false; }
+  // emit: a cough when it catches, then a fading wisp while it warms up
+  if(S.started && S.starting) { S.exhAcc = (S.exhAcc || 0) + dt*3; }
+  else if(S.coldT !== undefined && S.coldT < 7){ S.exhAcc = (S.exhAcc || 0) + dt*14*Math.exp(-S.coldT/2.2); }
+  while((S.exhAcc || 0) >= 1){ S.exhAcc -= 1; exhPuff(S.starting ? 0.5 : 0.6 + 0.4*Math.exp(-(S.coldT || 0)/1.5)); } }
 function puff(p, k){ const P = SMOKE[smokeI++ % SMOKE.length]; P.sp.position.copy(p); P.sp.visible = true; P.life = 1; P.k = k; P.v.set((Math.random() - 0.5)*1.2, 0.6 + Math.random()*0.8, (Math.random() - 0.5)*1.2); P.sp.scale.setScalar(0.8); }
 function smokeTick(dt){ for(const P of SMOKE){ if(P.life <= 0) continue; P.life -= dt*0.45; P.sp.position.addScaledVector(P.v, dt); P.v.multiplyScalar(Math.exp(-dt*0.8)); const s = 0.8 + (1 - P.life)*5; P.sp.scale.setScalar(s); P.sp.material.opacity = Math.max(0, P.life)*0.42*P.k; if(P.life <= 0) P.sp.visible = false; } }
 const SKID = (() => { const n = 3000, pos = new Float32Array(n*6*3); const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setDrawRange(0, 0);
@@ -834,6 +890,7 @@ function skidSeg(side, p, dir){
 const flameMesh = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,230,1)'); gr.addColorStop(0.3, 'rgba(255,170,60,.9)'); gr.addColorStop(0.7, 'rgba(255,80,20,.4)'); gr.addColorStop(1, 'rgba(255,40,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), blending:THREE.AdditiveBlending, depthWrite:false, transparent:true})); sp.visible = false; scene.add(sp); return sp; })();
 let flameT = 0; function flame(t){ flameT = Math.max(flameT, t); }
+const LAMP_RED = new THREE.Color(1, 0.06, 0.04), LAMP_AMBER = new THREE.Color(1, 0.55, 0.05);
 
 /* ---------- car on screen ---------- */
 function updateCar(dt){
@@ -856,6 +913,14 @@ function updateCar(dt){
     else SKID.last[side] = null;
   }
   // exhaust flame on pops
+  // tail lamps: amber flashes while it starts, dim red running lights with the engine on, bright red on the brakes
+  if(C.tail && C.tail.length){
+    let col = LAMP_RED, k = 0;
+    if(S.amberT > 0){ S.amberT -= dt; col = LAMP_AMBER; k = Math.floor(S.amberT/0.32) % 2 === 0 ? 5 : 0; }
+    else if(S.engineOn !== false && S.started){ k = S.brk ? 6 : 0.55; }
+    for(const mt of C.tail){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
+    for(const gm of C.tailGlow){ gm.color.copy(col); gm.opacity = Math.min(1, k/5)*0.7; }
+  }
   if(flameT > 0){ flameT -= dt; const e = C.exhaust.clone().applyMatrix4(car.matrixWorld); flameMesh.position.copy(e); flameMesh.visible = Math.random() > 0.25; flameMesh.scale.setScalar(0.35 + Math.random()*0.35); } else flameMesh.visible = false;
   sun.position.set(S.x + SUN_DIR.x*120, S.y + SUN_DIR.y*120, S.z + SUN_DIR.z*120); sun.target.position.set(S.x, S.y, S.z);
 }
@@ -1057,7 +1122,7 @@ function frame(){
     updateCar(dt);
     // remember a clean spot to come back to with R
     safeT -= dt; if(safeT <= 0 && S.started && S.kmh > 10 && S.slipR < 0.3){ safeT = 1; S.safe = {x:S.x, z:S.z}; }
-    smokeTick(dt); engineSound(dt); netTick(dt); hud(dt);
+    smokeTick(dt); exhTick(dt); engineSound(dt); netTick(dt); hud(dt);
     if(S.started && S.intro > 0) introCamera(dt);
     else if(S.started) positionCamera(dt, false);
     else showroomCamera(t);
