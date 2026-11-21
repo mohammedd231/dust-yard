@@ -78,6 +78,13 @@ input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--
 .races .r{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);padding:6px 6px 6px 12px}
 .races small{color:var(--muted)}
 .status{color:var(--muted);margin:0;font-size:12px}
+.splash{position:fixed;inset:0;z-index:50;background:#05060c url(img/drift-splash.jpg) center 38%/cover no-repeat;display:flex;align-items:flex-end;justify-content:center;transition:opacity .6s}
+.splash.done{opacity:0;pointer-events:none}
+.splash::after{content:'';position:absolute;inset:auto 0 0 0;height:34%;background:linear-gradient(transparent,rgba(5,6,12,.9));pointer-events:none}
+.splash-bot{position:relative;z-index:1;width:min(560px,82vw);margin-bottom:calc(5vh + env(safe-area-inset-bottom,0px));text-align:center}
+.splash-bar{height:8px;border-radius:99px;background:rgba(255,255,255,.14);overflow:hidden;box-shadow:0 0 18px rgba(255,60,200,.35)}
+.splash-bar i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#ff2fd6,#ff7a1a,#2fa8ff);transition:width .25s}
+#splashTxt{margin:10px 0 0;color:#fff;font:700 13px/1 system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;text-shadow:0 1px 6px #000}
 .load{height:3px;background:rgba(235,236,240,.1)} .load i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 @media (max-width:600px){.board{display:none}.score .cur{font-size:40px}}
 /* phones: the speed panel moves to the bottom middle, between the steering and pedal buttons */
@@ -91,6 +98,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
   <div class="board" id="board"><div class="lbl" id="boardHd">Drift score</div><ol id="boardList"></ol></div>
   <div class="dash"><div><span class="spd" id="spd">0</span> <span class="lbl">km/h</span></div><div class="gear" id="gear">N</div><div class="rpm" id="rpm"></div></div>
 </div>
+<div id="splash" class="splash"><div class="splash-bot"><div class="splash-bar"><i id="splashBar"></i></div><p id="splashTxt">Loading…</p></div></div>
 <button id="ignBtn" class="ign" type="button" hidden>Cold start<small>Press I or Enter · then hold Enter to rev</small></button>
 <div id="menu">
   <div class="card">
@@ -139,7 +147,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.11';
+const BUILD = '2026-11-21.12';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
@@ -233,7 +241,8 @@ function headlights(g, on){ const v = NIGHT && on; if(g.userData.hl === v) retur
   g.traverse(o => { if(o.userData.headGlow || o.userData.headPool) o.visible = v; if(o.userData.headLamp){ o.material.emissive.setRGB(1, 0.97, 0.9); o.material.emissiveIntensity = v ? 3.2 : 0; } }); }
 /* ---------- loading ---------- */
 let loaded = 0; const NEED = 2;
-const loadBar = () => $('loadBar').style.width = Math.round(loaded/NEED*100) + '%';
+const setLoad = (pct, txt) => { $('loadBar').style.width = pct + '%'; $('splashBar').style.width = pct + '%'; if(txt){ $('status').textContent = txt; $('splashTxt').textContent = txt; } };
+const loadBar = () => setLoad(Math.round(loaded/NEED*100));
 const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null;
 const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, exhaustAt:[-0.42, 0.3, -2.12], drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
@@ -256,9 +265,9 @@ loader.load('models/drift/track.glb', g => {
     ms.forEach(m => { if(m.map) m.map.anisotropy = 4; if(m.transparent || m.alphaTest){ m.alphaTest = Math.max(m.alphaTest || 0, 0.45); m.transparent = false; } }); } });
   scene.add(g.scene); TRACK = g.scene; TRACK.updateMatrixWorld(true);
   HM = buildHeightmap(TRACK);
-  loaded++; loadBar(); if(loaded < NEED) $('status').textContent = 'Loading the car…'; maybeReady();
-}, e => { if(e.total){ const p = Math.round(e.loaded/e.total*100); $('status').textContent = 'Loading the circuit… ' + p + '%'; $('loadBar').style.width = Math.round(p*0.5) + '%'; } },
-  () => $('status').textContent = "Couldn't load the circuit. Check your connection and reload.");
+  loaded++; loadBar(); if(loaded < NEED) setLoad(Math.round(loaded/NEED*100), 'Loading the car…'); maybeReady();
+}, e => { if(e.total){ const p = Math.round(e.loaded/e.total*100); setLoad(Math.round(p*0.5), 'Loading the circuit… ' + p + '%'); } },
+  () => setLoad(0, "Couldn't load the circuit. Check your connection and reload."));
 let carKey = store.get('car', 'rx7'); if(!CARS[carKey]) carKey = 'rx7';
 function loadCar(key, cb){
   const C = CARS[key];
@@ -673,7 +682,7 @@ const camMode = 0;   // chase camera only
 
 function maybeReady(){
   if(loaded < NEED) return;
-  $('status').textContent = 'Ready. Pick a car and go.';
+  setLoad(100, 'Ready'); $('status').textContent = 'Ready. Pick a car and go.'; setTimeout(() => $('splash').classList.add('done'), 350); setTimeout(() => $('splash').remove(), 1100);
   $('onlineBtn').disabled = false; $('soloBtn').disabled = false; renderRaces();
   spawn(0); setCar(carKey);
 }
