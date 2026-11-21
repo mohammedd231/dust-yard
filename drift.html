@@ -163,7 +163,7 @@ let loaded = 0; const NEED = 2;
 const loadBar = () => $('loadBar').style.width = Math.round(loaded/NEED*100) + '%';
 const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null;
-const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass/, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
+const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
                integra:{ file:'models/drift/integra.glb', name:'Acura Integra', length:4.53, drive:'rwd', power:150000, mass:1180, redline:7600, gears:[3.23, 1.9, 1.27, 0.97, 0.78], final:4.4, model:null,
                  wheelMat:/^(rims|tire_rim|rotor|caliper|black_rims|rim_metal)$/, neon:0x1e9bff },
                jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff },
@@ -429,15 +429,16 @@ function prepCar(C, m){
         o.geometry = gf; rear = new THREE.Mesh(gb, o.material); rear.position.copy(o.position); rear.quaternion.copy(o.quaternion); rear.scale.copy(o.scale); rear.name = (o.name || 'lamp') + '_rear'; o.parent.add(rear);
       }
       const mt = rear.material.clone(); if(!mt.emissive) continue; if(mt.transmission) mt.transmission = 0;
+      if(mt.transparent || mt.opacity < 1){ mt.transparent = false; mt.opacity = 1; mt.depthWrite = true; }   // a see-through lens would hide its own glow
       mt.emissive = new THREE.Color(0, 0, 0); mt.emissiveMap = mt.map || null; mt.emissiveIntensity = 0; mt.toneMapped = false; mt.needsUpdate = true; rear.material = mt; rear.userData.tailLamp = true; C.tail.push(mt);
     }
     // a soft glow just behind each lamp cluster (left and right) so the lamps read as lit from a distance
     root.updateMatrixWorld(true); C.tailGlow = [];
     const tb = new THREE.Box3(); root.traverse(o => { if(o.userData.tailLamp) tb.expandByObject(o); });
-    if(!tb.isEmpty()){ const w = tb.max.x - tb.min.x, ys = (tb.min.y + tb.max.y)/2;
+    if(!tb.isEmpty()){ const w = tb.max.x - tb.min.x, ys = tb.max.y - 0.3*(tb.max.y - tb.min.y);   // upper part of the lamps, where the lit lens is
       for(const x of w > 0.6 ? [tb.min.x + 0.12*w, tb.max.x - 0.12*w] : [(tb.min.x + tb.max.x)/2]){
         const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex(), color:0xff2018, transparent:true, opacity:0, depthWrite:false, blending:THREE.AdditiveBlending, toneMapped:false}));
-        sp.position.set(x, ys, tb.min.z - 0.05); sp.scale.set(0.85, 0.45, 1); sp.userData.tailGlow = true; root.add(sp); C.tailGlow.push(sp.material); } }
+        sp.position.set(x, ys, tb.min.z - 0.05); sp.scale.set(1.0, 0.55, 1); sp.userData.tailGlow = true; root.add(sp); C.tailGlow.push(sp.material); } }
   }
   // exhaust tips: the back end of the model's own exhaust pipes (one or two outlets)
   { root.updateMatrixWorld(true); const pts = [], v = new V3();
@@ -924,7 +925,7 @@ function skidSeg(side, p, dir){
 const flameMesh = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,230,1)'); gr.addColorStop(0.3, 'rgba(255,170,60,.9)'); gr.addColorStop(0.7, 'rgba(255,80,20,.4)'); gr.addColorStop(1, 'rgba(255,40,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), blending:THREE.AdditiveBlending, depthWrite:false, transparent:true})); sp.visible = false; scene.add(sp); return sp; })();
 let flameT = 0; function flame(t){ flameT = Math.max(flameT, t); }
-const LAMP_RED = new THREE.Color(1, 0.06, 0.04), LAMP_AMBER = new THREE.Color(1, 0.55, 0.05);
+const LAMP_RED = new THREE.Color(1, 0.015, 0.01), LAMP_AMBER = new THREE.Color(1, 0.55, 0.05);
 
 /* ---------- car on screen ---------- */
 function updateCar(dt){
@@ -951,9 +952,9 @@ function updateCar(dt){
   if(C.tail && C.tail.length){
     let col = LAMP_RED, k = 0;
     if(S.amberT > 0){ S.amberT -= dt; col = LAMP_AMBER; k = Math.floor(S.amberT/0.32) % 2 === 0 ? 5 : 0; }
-    else if(S.engineOn !== false && S.started){ k = S.brk ? 6 : 0.55; }
+    else if(S.engineOn !== false && S.started){ k = S.brk ? 9 : 0.55; }
     for(const mt of C.tail){ mt.emissive.copy(col); mt.emissiveIntensity = k; }
-    for(const gm of C.tailGlow){ gm.color.copy(col); gm.opacity = Math.min(1, k/5)*0.7; }
+    for(const gm of C.tailGlow){ gm.color.copy(col); gm.opacity = Math.min(1, k/5)*(k > 6 ? 1 : 0.7); }
   }
   if(flameT > 0){ flameT -= dt; const e = C.exhaust.clone().applyMatrix4(car.matrixWorld); flameMesh.position.copy(e); flameMesh.visible = Math.random() > 0.25; flameMesh.scale.setScalar(0.35 + Math.random()*0.35); } else flameMesh.visible = false;
   sun.position.set(S.x + SUN_DIR.x*120, S.y + SUN_DIR.y*120, S.z + SUN_DIR.z*120); sun.target.position.set(S.x, S.y, S.z);
