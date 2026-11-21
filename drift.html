@@ -776,6 +776,8 @@ const SAMPLES = {
   rx7:{ dir:'sounds/rx7/', prefix:'rx7_', loops:[['idle', 950, 0, 4800, 1000, 1, 0, 5.2], ['high', 7200, 3800, 99999, 1000], ['antilag', 8300, 8150, 9999, 300, 1.6, 0]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
 };
 SAMPLES.fortune = SAMPLES.rx7;   // Han's RX-7 sounds exactly like ours
+// Eclipse GSX: its own cold start, idle and a pull through the gears
+SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', loops:[['idle', 900, 0, 2600], ['pull', 2500, 1700, 99999, 800]], pops:0, coldstart:true, fire:2.05, vol:1.3 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
@@ -802,7 +804,7 @@ function coldStart(){
   const P = SAMPLES[carKey];
   if(P && !P.ready && !P.failed && (S.waitN = (S.waitN || 0) + 1) < 40){ $('ignBtn').firstChild.textContent = 'Loading…'; setTimeout(coldStart, 100); return; }   // give the recordings a moment to arrive
   S.waitN = 0;
-  const buf = P && P.ready && P.coldBuf, fire = 1.7;
+  const buf = P && P.ready && P.coldBuf, fire = P && P.fire || 1.7;   // seconds into the recording where it catches
   S.starting = 1; S.amberT = (buf ? fire : 1.3) + 1.2; $('ignBtn').classList.add('busy'); $('ignBtn').firstChild.textContent = 'Starting…';
   if(AC){
     const src = AC.createBufferSource(), g = AC.createGain(); g.gain.value = 1.15;
