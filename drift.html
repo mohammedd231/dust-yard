@@ -98,7 +98,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <span class="lbl">Car</span>
     <div class="sets" id="sets"><button type="button" data-set="classic" class="on">Classic</button><button type="button" data-set="tokyo">Tokyo Drift</button></div>
     <div class="cars" id="cars">
-      <button type="button" data-car="rx7" class="on"><b>Mazda RX-7</b><small>Tuned rotary, rear-drive. Revs to 8,500 and pops on the overrun.</small></button>
+      <button type="button" data-car="rx7" class="on"><b>Mazda RX-7</b><small>Dom's red VeilSide C-II. Tuned rotary, rear-drive, revs to 8,500.</small></button>
       <button type="button" data-car="integra"><b>Acura Integra</b><small>'94 LS sedan, rear-drive swap with a VTEC four. Light and lively.</small></button>
       <button type="button" data-car="jdm"><b>JDM drift car</b><small>Rear-drive and powerful. Slides on the throttle.</small></button>
       <button type="button" data-car="fortune" hidden><b>VeilSide RX-7</b><small>Han's widebody Fortune. Same rotary, same feel as the RX-7.</small></button>
@@ -163,7 +163,7 @@ let loaded = 0; const NEED = 2;
 const loadBar = () => $('loadBar').style.width = Math.round(loaded/NEED*100) + '%';
 const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null;
-const CARS = { rx7:{ file:'models/drift/rx7.glb', name:'Mazda RX-7', length:4.29, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
+const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass/, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
                integra:{ file:'models/drift/integra.glb', name:'Acura Integra', length:4.53, drive:'rwd', power:150000, mass:1180, redline:7600, gears:[3.23, 1.9, 1.27, 0.97, 0.78], final:4.4, model:null,
                  wheelMat:/^(rims|tire_rim|rotor|caliper|black_rims|rim_metal)$/, neon:0x1e9bff },
                jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff },
