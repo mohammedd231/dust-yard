@@ -137,7 +137,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.7';
+const BUILD = '2026-11-21.8';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
@@ -569,6 +569,8 @@ function prepCar(C, m){
       for(const sx of [-1, 1]){ const tube = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, L*0.7), tubeM); tube.position.set((b2.min.x + b2.max.x)/2 + sx*(Wd/2 - 0.22), 0.16, (b2.min.z + b2.max.z)/2); root.add(tube); }
       { const tube = new THREE.Mesh(new THREE.BoxGeometry(Wd*0.6, 0.035, 0.05), tubeM); tube.position.set((b2.min.x + b2.max.x)/2, 0.2, b2.min.z + 0.3); root.add(tube); }
     } }
+  // the body hangs on its own pivot so it can lean in corners while the wheels stay planted on the road
+  { const pv = new THREE.Group(); pv.position.set(0, 0.45, 0); root.add(pv); root.updateMatrixWorld(true); pv.attach(m); C.body = pv; }
   C.model = root; C.wheels = wheels; C.sw = swPivot;
   C.wheelbase = wheels.length >= 4 ? (Math.max(...wheels.map(w => w.steer.position.z)) - Math.min(...wheels.map(w => w.steer.position.z))) : 2.5;
 }
@@ -585,7 +587,7 @@ function cloneCar(C){
       if(src.userData.bandCfg){ o.material.userData.bandCfg = src.userData.bandCfg; lamps.band.push(bandShader(o.material)); }
       (o.userData.amberPart ? lamps.amber : lamps.tail).push(o.material); }
     if(o.userData.tailGlow){ o.material = o.material.clone(); o.material.opacity = 0; lamps.glow.push(o.material); } });
-  return {g:r, wheels, lamps};
+  return {g:r, wheels, lamps, body:C.body ? at(r, path(C.model, C.body)) : null};
 }
 
 /* ---------- state ---------- */
@@ -1053,10 +1055,22 @@ const LAMP_RED = new THREE.Color(1, 0.015, 0.01), LAMP_AMBER = new THREE.Color(1
 function updateCar(dt){
   if(!car) return;
   const fx = Math.sin(S.h), fz = Math.cos(S.h), rx = Math.cos(S.h), rz = -Math.sin(S.h);
-  const hf = hAt(S.x + fx*1.3, S.z + fz*1.3), hb = hAt(S.x - fx*1.3, S.z - fz*1.3), hr = hAt(S.x + rx*0.75, S.z + rz*0.75), hl = hAt(S.x - rx*0.75, S.z - rz*0.75);
-  S.pitch = lerp(S.pitch, Math.atan2(hb - hf, 2.6) + clamp(-S.ax*0.004, -0.04, 0.04), 1 - Math.exp(-dt*8));
-  S.roll = lerp(S.roll, Math.atan2(hl - hr, 1.5) + clamp(S.ay*0.006, -0.07, 0.07), 1 - Math.exp(-dt*8));
-  car.position.set(S.x, S.y + (bumpT > 0 ? Math.sin(bumpT*70)*0.02 : 0), S.z);
+  // sit the car on the ground under its four wheels: a plane through them sets height, pitch and roll,
+  // then lift it if any wheel would still be inside a bump (so wheels and body never sink into the road)
+  const wl = (C.wheels && C.wheels.length >= 4) ? C.wheels.map(w => w.steer.position) : [new V3(0.75, 0, 1.3), new V3(-0.75, 0, 1.3), new V3(0.75, 0, -1.3), new V3(-0.75, 0, -1.3)];
+  const gh = wl.map(p => hAt(S.x + fx*p.z + rx*p.x, S.z + fz*p.z + rz*p.x));   // car-local x is world (rx, rz)
+  let zf = 0, zb = 0, nf = 0, nb = 0, hfS = 0, hbS = 0, hlS = 0, hrS = 0, xl = 0, xr = 0, nl = 0, nr = 0;
+  wl.forEach((p, i) => { if(p.z > 0){ hfS += gh[i]; zf += p.z; nf++; } else { hbS += gh[i]; zb += p.z; nb++; } if(p.x > 0){ hlS += gh[i]; xl += p.x; nl++; } else { hrS += gh[i]; xr += p.x; nr++; } });
+  const wb = Math.max(1, zf/nf - zb/nb), tw = Math.max(0.6, xl/nl - xr/nr);
+  const pitchG = Math.atan2(hbS/nb - hfS/nf, wb), rollG = Math.atan2(hlS/nl - hrS/nr, tw);
+  const yc = gh.reduce((a, b) => a + b, 0)/gh.length;
+  let lift = 0; wl.forEach((p, i) => { const pl = yc - Math.sin(pitchG)*p.z + Math.sin(rollG)*p.x; lift = Math.max(lift, gh[i] - pl); });
+  S.pitch = lerp(S.pitch, pitchG, 1 - Math.exp(-dt*10)); S.roll = lerp(S.roll, rollG, 1 - Math.exp(-dt*10));
+  // body lean (weight transfer) goes on the body only
+  S.bodyP = lerp(S.bodyP || 0, clamp(-S.ax*0.004, -0.04, 0.04), 1 - Math.exp(-dt*8)); S.bodyR = lerp(S.bodyR || 0, clamp(S.ay*0.006, -0.06, 0.06), 1 - Math.exp(-dt*8));
+  if(C.body) C.body.rotation.set(S.bodyP, 0, S.bodyR);
+  const yCar = Math.max(S.y, yc + lift);
+  car.position.set(S.x, yCar + (bumpT > 0 ? Math.sin(bumpT*70)*0.02 : 0), S.z);
   car.rotation.set(S.pitch, S.h, S.roll, 'YXZ');
   if(bumpT > 0) bumpT -= dt;
   const vf = S.vx*fx + S.vz*fz;
