@@ -162,7 +162,7 @@ new THREE.GLTFLoader().load('models/hud/tachometer.glb', g => {
 // the dial reads 0 at bottom right and 10 at top right, clockwise, 22.5 degrees per 1000 rpm; the model ships with the needle's tip (the long thin end) at about 2150
 function tachAngle(rpm){ return -THREE.MathUtils.degToRad((clamp(rpm, 0, 10000)/1000 - TACH.zero)*22.5); }
 TACH.zero = 2.15;
-const TACH_FACE = { rx7:0xff00ff, fortune:0xff00ff, jdm:0xff00ff, r34:0x2aa8ff, eclipse:0x00c83c };   // pink for the Supra and RX-7s, baby blue for the Skyline, green for the Eclipse
+const TACH_FACE = { rx7:0xff2cff, fortune:0xff2cff, jdm:0xff2cff, r34:0x2aa8ff, eclipse:0x00c83c };   // pink for the Supra and RX-7s, baby blue for the Skyline, green for the Eclipse
 function tachRender(dt){
   if(!TACH.needle || !S.started || $('hud').hidden) return;
   TACH.rpm += ((S.engineOn === false ? 0 : S.rpm) - TACH.rpm)*Math.min(1, dt*14); if(TACH.fixed != null) TACH.rpm = TACH.fixed;
