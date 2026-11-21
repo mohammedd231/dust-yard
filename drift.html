@@ -145,7 +145,7 @@ const FOGC = 0xb9c6d1; scene.fog = new THREE.Fog(FOGC, 120, 650);
 const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 2500);
 /* Tachometer: a real 0-10k gauge drawn in its own little scene in the corner, needle on the live revs */
 const TACH = { scene:new THREE.Scene(), cam:new THREE.PerspectiveCamera(24, 1, 0.1, 400), needle:null, rpm:0 };
-TACH.scene.add(new THREE.HemisphereLight(0xffffff, 0x50525a, 1.1)); { const d = new THREE.DirectionalLight(0xffffff, 0.9); d.position.set(0.3, 0.6, 1); TACH.scene.add(d); }
+TACH.scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2)); { const d = new THREE.DirectionalLight(0xffffff, 1); d.position.set(0, 0, -1); TACH.scene.add(d); }   // lit from behind: no glare on the glass
 new THREE.GLTFLoader().load('models/hud/tachometer.glb', g => {
   const m = g.scene; m.updateMatrixWorld(true);
   const byMat = re => { let r = null; m.traverse(o => { if(!r && o.isMesh && re.test(o.material && o.material.name || '')) r = o; }); return r; };
@@ -162,14 +162,14 @@ new THREE.GLTFLoader().load('models/hud/tachometer.glb', g => {
 // the dial reads 0 at bottom right and 10 at top right, clockwise, 22.5 degrees per 1000 rpm; the model ships with the needle's tip (the long thin end) at about 2150
 function tachAngle(rpm){ return -THREE.MathUtils.degToRad((clamp(rpm, 0, 10000)/1000 - TACH.zero)*22.5); }
 TACH.zero = 2.15;
-const TACH_FACE = { rx7:0xff00e0, fortune:0xff00e0, jdm:0xff00e0, r34:0x45b8ff, eclipse:0x00ff4c };   // pink for the Supra and RX-7s, baby blue for the Skyline, green for the Eclipse
+const TACH_FACE = { rx7:0xff00ff, fortune:0xff00ff, jdm:0xff00ff, r34:0x2aa8ff, eclipse:0x00c83c };   // pink for the Supra and RX-7s, baby blue for the Skyline, green for the Eclipse
 function tachRender(dt){
   if(!TACH.needle || !S.started || $('hud').hidden) return;
   TACH.rpm += ((S.engineOn === false ? 0 : S.rpm) - TACH.rpm)*Math.min(1, dt*14); if(TACH.fixed != null) TACH.rpm = TACH.fixed;
   TACH.needle.rotation.z = tachAngle(TACH.rpm);
   // backlit dial colour per car
   const fc = TACH_FACE[carKey];
-  if(TACH.face && TACH.faceKey !== carKey){ TACH.faceKey = carKey; TACH.face.material = fc ? new THREE.MeshBasicMaterial({color:fc, toneMapped:false}) : TACH.faceStock; }
+  if(TACH.face && TACH.faceKey !== carKey){ TACH.faceKey = carKey; TACH.face.material = fc ? new THREE.MeshBasicMaterial({color:fc}) : TACH.faceStock; }
   const touch = document.documentElement.classList.contains('touch'), sz = touch ? Math.min(140, innerHeight*0.34) : Math.min(230, innerHeight*0.3);
   const x = innerWidth - sz - (touch ? 64 : 10), y = touch ? innerHeight - sz - 4 : 8;   // on phones: top right, beside the pause button
   renderer.autoClear = false; renderer.setScissorTest(true); renderer.setViewport(x, y, sz, sz); renderer.setScissor(x, y, sz, sz);
