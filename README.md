@@ -20,7 +20,7 @@ W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam 
 - Boat: "Boat" by KamillaKraus (https://sketchfab.com/KamillaKraus), CC BY 4.0. Texture recompressed and mesh simplified for the web.
 - Supra engine sound (drift game): clips cut from YouTube videos by @throtclips ("+1000HP Supra ASMR", incl. the cold start), @Pintsandpetrol ("Mk4 Supra Anti-Lag"), @EatSleepShift ("Supra Brutal Antilag Sound Compilation") and @jdmlove8771 ("stutututu supra 2jz"). Not licensed for reuse; replace before any commercial use.
 - Eclipse sound (drift game): cold start and idle from "95 Mitsubishi Eclipse GSX Cold Start" by the channel shown in the recording; pulls from "Best sounding Eclipse" by @Buddybryan3. Same caveat.
-- R34 sound (drift game): cold start, idle, cruise and pull from "Nissan Skyline R34 GT-R Cold Start", "NISSAN SKYLINE R34 GTR | RAW SOUND" and bangs from "Big flames GTR" (screen recordings the owner shared). Same caveat.
+- R34 sound (drift game): cold start, idle, cruise and pull from "Nissan Skyline R34 GT-R Cold Start", "NISSAN SKYLINE R34 GTR | RAW SOUND" bangs from "Big flames GTR", high-rev pull and dump valve from "nissan GT-R r34 dump valve" by @JWPerf (screen recordings the owner shared). Same caveat.
 - Tachometer (drift HUD): "10k tachometer" model shared by the owner (Sketchfab; check its licence).
 - Tokyo Drift cars (drift game): VeilSide Fortune RX-7, Brian's R34 GT-R, Brian's '95 Eclipse and Dom's VeilSide C-II RX-7 (Classic) models shared by the owner (Sketchfab; check each model's licence before any commercial use).
 - RX-7 rotary (drift game): idle (brap) and high-rev clips from screen recordings the owner shared; anti-lag and bangs from "1200HP Turbo 4-Rotor RX-7 Start-Up" by @ShafeeqLimbada. Same caveat.
