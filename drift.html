@@ -64,6 +64,10 @@ h1{font-family:var(--display);font-weight:800;font-size:46px;line-height:.95;mar
 .cars button b{font-family:var(--display);font-size:22px;font-weight:800}
 .cars button small{color:var(--muted);line-height:1.4}
 .cars button.on{border-color:var(--accent);background:rgba(255,90,31,.12)}
+.cars button[hidden]{display:none}
+.sets{display:flex;gap:6px;margin:0 0 8px}
+.sets button{all:unset;cursor:pointer;padding:6px 14px;border:1px solid var(--line);font:700 12px/1 system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.sets button.on{border-color:var(--accent);color:#fff;background:rgba(255,90,31,.12)}
 input{background:rgba(235,236,240,.08);border:1px solid var(--line);color:var(--fg);font:14px var(--mono);padding:10px 12px;flex:1;min-width:0}
 .keys{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;color:var(--muted)}
 .keys dt{color:var(--fg);font-weight:600}
@@ -92,10 +96,13 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <h1>Drift</h1>
     <p class="lede">Pick a car, hold Space to pull the handbrake into the corner, and keep it sideways on the throttle. Angle and speed score points; friends can join the same session.</p>
     <span class="lbl">Car</span>
+    <div class="sets" id="sets"><button type="button" data-set="classic" class="on">Classic</button><button type="button" data-set="tokyo">Tokyo Drift</button></div>
     <div class="cars" id="cars">
       <button type="button" data-car="rx7" class="on"><b>Mazda RX-7</b><small>Tuned rotary, rear-drive. Revs to 8,500 and pops on the overrun.</small></button>
       <button type="button" data-car="integra"><b>Acura Integra</b><small>'94 LS sedan, rear-drive swap with a VTEC four. Light and lively.</small></button>
       <button type="button" data-car="jdm"><b>JDM drift car</b><small>Rear-drive and powerful. Slides on the throttle.</small></button>
+      <button type="button" data-car="fortune" hidden><b>VeilSide RX-7</b><small>Han's widebody Fortune. Same rotary, same feel as the RX-7.</small></button>
+      <button type="button" data-car="r34" hidden><b>Skyline GT-R R34</b><small>Brian's silver-blue R34, set up rear-drive to slide.</small></button>
     </div>
     <span class="lbl">Your name</span>
     <div class="row"><input id="nick" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Your name"></div>
@@ -158,7 +165,16 @@ let TRACK = null, HM = null;
 const CARS = { rx7:{ file:'models/drift/rx7.glb', name:'Mazda RX-7', length:4.29, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
                integra:{ file:'models/drift/integra.glb', name:'Acura Integra', length:4.53, drive:'rwd', power:150000, mass:1180, redline:7600, gears:[3.23, 1.9, 1.27, 0.97, 0.78], final:4.4, model:null,
                  wheelMat:/^(rims|tire_rim|rotor|caliper|black_rims|rim_metal)$/, neon:0x1e9bff },
-               jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff } };
+               jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff },
+               // Tokyo Drift line-up
+               fortune:{ file:'models/drift/fortune.glb', name:'VeilSide RX-7', set:'tokyo', length:4.48, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a,
+                 wheelMat:/^(ext_tyres|VS_RIM_PLASTIC|VS_RIM_LOGO|VS_RIM_CHROME|VS_RIM_ALUM|ext_ap_disc_hub|ext_ap_disc_front|ext_ap_disc_rear|ext_ap_caliper)$/, tyreMat:/^ext_tyres$/,
+                 lampMat:/^tailight$/, lampGlass:/^ext_glass_rear_tinted$/, exhaustMat:/^material$/ },
+               r34:{ file:'models/drift/r34.glb', name:'Nissan Skyline GT-R', set:'tokyo', length:4.6, drive:'rwd', power:240000, mass:1500, redline:8000, gears:[3.83, 2.36, 1.69, 1.31, 1.0, 0.79], final:3.9, model:null, neon:0x1e9bff,
+                 wheelMat:/Wheel1A|^material$|riminside|^cal_m$|Calliper/, tyreMat:/^material$/, lampMat:/red_glass/ } };
+// line-ups on the home screen: the originals, and the Tokyo Drift cars
+const SETS = { classic:['rx7', 'integra', 'jdm'], tokyo:['fortune', 'r34'] };
+const setOf = k => CARS[k] && CARS[k].set || 'classic';
 loader.load('models/drift/track.glb', g => {
   g.scene.traverse(o => { if(o.isMesh){ o.receiveShadow = true; o.castShadow = false; const ms = Array.isArray(o.material) ? o.material : [o.material];
     ms.forEach(m => { if(m.map) m.map.anisotropy = 4; if(m.transparent || m.alphaTest){ m.alphaTest = Math.max(m.alphaTest || 0, 0.45); m.transparent = false; } }); } });
@@ -175,7 +191,7 @@ function loadCar(key, cb){
   C.loading = [cb];
   loader.load(C.file, g => { prepCar(C, g.scene); const l = C.loading; C.loading = null; l.forEach(f => f && f(C)); }, undefined, () => $('status').textContent = "Couldn't load the car.");
 }
-loadCar(carKey, () => { loaded++; loadBar(); maybeReady(); Object.keys(CARS).forEach(k => loadCar(k)); });
+loadCar(carKey, () => { loaded++; loadBar(); maybeReady(); SETS[setOf(carKey)].forEach(k => loadCar(k)); });
 
 /* Height and wall map, built once from the circuit's own triangles (0.5 m cells):
    gentle faces become road/terrain height; steep faces (barriers, walls, trees) become obstacles. */
@@ -301,7 +317,7 @@ function prepCar(C, m){
     // opaque black 'glass' (the RX-7 ships its windows like that): make it real tinted glass you can see through
     if(/glass|window/i.test(mt.name || '') && !mt.transparent && !mt.map){ mt.transparent = true; mt.opacity = 0.3; mt.depthWrite = false; mt.roughness = 0.05; mt.metalness = 0; }
     // lamp covers: clear, so the lit lamp behind shows through
-    if(/lightglass|lamp.?glass|lens/i.test(mt.name || '')){ mt.transparent = true; mt.opacity = 0.12; mt.depthWrite = false; mt.roughness = 0.05; mt.metalness = 0; if(mt.transmission) mt.transmission = 0; }
+    if(/lightglass|lamp.?glass|lens/i.test(mt.name || '') || (C.lampGlass && C.lampGlass.test(mt.name || ''))){ mt.transparent = true; mt.opacity = 0.12; mt.depthWrite = false; mt.roughness = 0.05; mt.metalness = 0; if(mt.transmission) mt.transmission = 0; }
     mt.needsUpdate = true; }); });
   // drop display stands / ground planes that came with the model (big and flat)
   m.updateMatrixWorld(true);
@@ -364,11 +380,11 @@ function prepCar(C, m){
     const box = new THREE.Box3(); g.objs.forEach(o => box.expandByObject(o)); let c = g.objs[0].userData.center ? g.c.clone() : box.getCenter(new V3()); const sz = box.getSize(new V3());
     // the tyre alone gives the true axle centre (a brake caliper hangs off one side and would make the wheel wobble)
     const matOf = o => { let n = ''; o.traverse(q => { if(!n && q.isMesh) n = q.material && q.material.name || ''; }); return n; };
-    const tyres = g.objs.filter(o => /tire|tyre/i.test(matOf(o)));
+    const tyres = g.objs.filter(o => (C.tyreMat || /tire|tyre/i).test(matOf(o)));
     if(tyres.length && C.wheelMat){ const tb = new THREE.Box3(); tyres.forEach(o => o.userData.center ? tb.expandByPoint(o.userData.center) : tb.expandByObject(o)); c = tb.getCenter(new V3()); }
     const steer = new THREE.Group(); steer.position.copy(root.worldToLocal(c.clone())); root.add(steer);
     const spin = new THREE.Group(); steer.add(spin); spin.updateMatrixWorld(true);
-    g.objs.forEach(o => (/caliper/i.test(matOf(o)) ? steer : spin).attach(o));
+    g.objs.forEach(o => (/cal+iper|^cal_m$/i.test(matOf(o)) ? steer : spin).attach(o));
     wheels.push({steer, spin, front:c.z > 0, r:Math.max(sz.y, 0.4)/2});
   }
   // sit the tyres on the ground (some models have bits hanging lower than the wheels)
@@ -395,7 +411,7 @@ function prepCar(C, m){
   // tail lamps: the model's own rear lamp geometry glows, so every car keeps its real lamp shape.
   // Some models (the Integra) keep front and rear lamps in one mesh: cut those in half and only light the back.
   { root.updateMatrixWorld(true); C.tail = [];
-    const lampRe = /brakelamp|tail.?lights?|lighta/i, cand = [];
+    const lampRe = C.lampMat || /brakelamp|tail.?lights?|lighta/i, cand = [];
     root.traverse(o => { if(o.isMesh && lampRe.test(o.material && o.material.name || '')) cand.push(o); });
     for(const o of cand){
       const b = new THREE.Box3().setFromObject(o); if(b.min.z > 0) continue;   // all at the front: those are headlights
@@ -409,7 +425,7 @@ function prepCar(C, m){
         const gf = new THREE.BufferGeometry(); for(const k in g0.attributes) gf.setAttribute(k, g0.attributes[k]); gf.setIndex(front);
         o.geometry = gf; rear = new THREE.Mesh(gb, o.material); rear.position.copy(o.position); rear.quaternion.copy(o.quaternion); rear.scale.copy(o.scale); rear.name = (o.name || 'lamp') + '_rear'; o.parent.add(rear);
       }
-      const mt = rear.material.clone(); if(!mt.emissive) continue;
+      const mt = rear.material.clone(); if(!mt.emissive) continue; if(mt.transmission) mt.transmission = 0;
       mt.emissive = new THREE.Color(0, 0, 0); mt.emissiveMap = mt.map || null; mt.emissiveIntensity = 0; mt.toneMapped = false; mt.needsUpdate = true; rear.material = mt; rear.userData.tailLamp = true; C.tail.push(mt);
     }
     // a soft glow just behind each lamp cluster (left and right) so the lamps read as lit from a distance
@@ -422,7 +438,7 @@ function prepCar(C, m){
   }
   // exhaust tips: the back end of the model's own exhaust pipes (one or two outlets)
   { root.updateMatrixWorld(true); const pts = [], v = new V3();
-    root.traverse(o => { if(!o.isMesh || !/exhaust|muffl/i.test(o.material && o.material.name || '')) return;
+    root.traverse(o => { if(!o.isMesh || !(C.exhaustMat || /exhaust|muffl/i).test(o.material && o.material.name || '')) return;
       const pa = o.geometry.attributes.position, nrm = pa.normalized ? (pa.array instanceof Int16Array ? 32767 : pa.array instanceof Uint16Array ? 65535 : pa.array instanceof Int8Array ? 127 : 255) : 1;
       o.updateMatrixWorld(true); for(let i = 0; i < pa.count; i += Math.max(1, pa.count/20000|0)){ v.fromBufferAttribute(pa, i).divideScalar(nrm); o.localToWorld(v); pts.push(v.clone()); } });
     C.exhaustPts = [];
@@ -487,7 +503,7 @@ function setCar(key){
   });
 }
 /* Showroom: on the home screen every car sits parked side by side on the grid, seen from the front */
-const SHOW = { cars:{}, order:Object.keys(CARS) };
+const SHOW = { cars:{}, order:SETS[setOf(carKey)] };
 function showSlot(key){
   const i = SHOW.order.indexOf(key), n = SHOW.order.length, off = (i - (n - 1)/2)*3.4;
   // side by side across the straight (the car's right is -z when it faces +x)
@@ -539,9 +555,22 @@ function spawn(slot){
   S.x = GRID.x + (slot % 4)*7; S.z = GRID.z + (Math.floor(slot/4) % 2 ? 3 : -2);
   S.h = GRID.h; S.vx = S.vz = S.r = 0; S.steer = 0; S.y = hAt(S.x, S.z); S.gear = 1;
 }
+// line-up tabs: show that set's cars on the grid and in the list, load them, pick one
+function showSet(set, pick){
+  document.querySelectorAll('#sets button').forEach(b => b.classList.toggle('on', b.dataset.set === set));
+  document.querySelectorAll('#cars button').forEach(b => { b.hidden = setOf(b.dataset.car) !== set; });
+  SHOW.order = SETS[set];
+  for(const k in SHOW.cars){ scene.remove(SHOW.cars[k]); delete SHOW.cars[k]; } SHOW.cam = null; S.introSide = undefined;
+  SETS[set].forEach(k => loadCar(k));
+  if(pick){ const k = setOf(carKey) === set ? carKey : SETS[set][0];
+    document.querySelectorAll('#cars button').forEach(q => q.classList.toggle('on', q.dataset.car === k));
+    carKey = k; store.set('car', k); if(loaded >= NEED) setCar(k); }
+}
+document.querySelectorAll('#sets button').forEach(b => b.addEventListener('click', () => showSet(b.dataset.set, true)));
 document.querySelectorAll('#cars button').forEach(b => { b.classList.toggle('on', b.dataset.car === carKey); b.addEventListener('click', () => {
   document.querySelectorAll('#cars button').forEach(q => q.classList.toggle('on', q === b));
   carKey = b.dataset.car; store.set('car', carKey); if(loaded >= NEED) setCar(carKey); }); });
+showSet(setOf(carKey), false);
 
 /* ---------- physics ----------
    Bicycle model with tyre slip: grip peaks at a few degrees and falls off beyond it, so
@@ -742,6 +771,7 @@ const SAMPLES = {
   // RX-7: the brap idle sped up with the revs (the pup-pup gets faster until it blurs), the smooth high-rpm scream, then anti-lag at the limiter
   rx7:{ dir:'sounds/rx7/', prefix:'rx7_', loops:[['idle', 950, 0, 4800, 1000, 1, 0, 5.2], ['high', 7200, 3800, 99999, 1000], ['antilag', 8300, 8150, 9999, 300, 1.6, 0]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
 };
+SAMPLES.fortune = SAMPLES.rx7;   // Han's RX-7 sounds exactly like ours
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
@@ -797,6 +827,7 @@ const ENGINE_VOICE = {
   jdm:{ fire:3, osc:[['sawtooth', 1, 0.5], ['sawtooth', 0.5, 0.5], ['triangle', 1.5, 0.18], ['square', 2, 0.06]], lp:[320, 1900, 0.22], jitter:0.004, vol:1.05 },
   integra:{ fire:2, osc:[['sawtooth', 1, 0.45], ['square', 2, 0.2], ['sawtooth', 0.5, 0.25], ['triangle', 3, 0.15]], lp:[600, 2700, 0.42], jitter:0.006, vol:0.95 },
   rx7:{ fire:2, osc:[['square', 2, 0.32], ['sawtooth', 3, 0.3], ['square', 4, 0.16], ['sawtooth', 1, 0.14]], lp:[900, 3800, 0.55], jitter:0.03, vol:0.85 } };
+ENGINE_VOICE.fortune = ENGINE_VOICE.rx7;
 function engineSound(dt){
   if(!A || !C) return;
   const V = ENGINE_VOICE[carKey] || ENGINE_VOICE.jdm;
