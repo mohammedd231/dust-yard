@@ -65,6 +65,7 @@ html.touch .ign{bottom:auto;top:calc(26% + env(safe-area-inset-top,0px));padding
 .card input{height:42px;box-sizing:border-box;border-radius:10px;background:rgba(0,0,0,.35);border-color:rgba(255,255,255,.14);font:600 15px system-ui,sans-serif}
 .card .grow{flex:1 1 0;min-height:4px}
 .play{all:unset;cursor:pointer;height:60px;border-radius:14px;text-align:center;background:linear-gradient(90deg,#ff2fd6,#ff7a1a);color:#fff;font:800 26px/60px var(--display);letter-spacing:.16em;text-transform:uppercase;box-shadow:0 0 30px rgba(255,47,214,.5)}
+.home{all:unset;cursor:pointer;height:42px;border-radius:12px;text-align:center;border:1px solid rgba(255,255,255,.18);color:#fff;font:700 13px/42px system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase}.home:hover{border-color:var(--sel,#ff2fd6)}.home[hidden]{display:none}
 .play:hover{filter:brightness(1.1)} .play:disabled{opacity:.45;cursor:default;box-shadow:none}
 .ctl summary{cursor:pointer;color:#c9cfe6;font:600 12px system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase}
 .ctl .keys{margin-top:10px;font-size:13px}
@@ -162,6 +163,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <div class="grow"></div>
     <div class="seg sq" id="mode"><button type="button" data-mode="online" class="on">Online</button><button type="button" data-mode="solo">Free drive</button></div>
     <button id="playBtn" class="play" type="button" disabled>Play</button>
+    <button id="homeBtn" class="home" type="button" hidden>Back to garage</button>
     <div class="row" hidden><button id="onlineBtn" class="btn primary" type="button" disabled>Drift online</button><button id="soloBtn" class="btn" type="button" disabled>Free drive</button></div>
     <div class="races" id="races"></div>
     <div class="build" id="build"></div>
@@ -196,7 +198,7 @@ const V3 = THREE.Vector3, clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp
 const now = () => performance.now()/1000;
 /* Build tag: shown under the menu, and the page checks now and then whether a newer one is live
    (an old copy left open on a phone would otherwise keep running old code next to friends on the new one). */
-const BUILD = '2026-11-21.17';
+const BUILD = '2026-11-22.1';
 { const b = document.getElementById('build'); if(b) b.textContent = 'Build ' + BUILD;
   const check = () => fetch(location.pathname + '?b=' + Date.now(), {cache:'no-store'}).then(r => r.text()).then(t => { const m = t.match(/const BUILD = '([^']+)'/); if(m && m[1] !== BUILD && !document.querySelector('.upd')){ const u = document.createElement('button'); u.className = 'upd'; u.textContent = 'New version available, tap to update'; u.onclick = () => location.reload(); document.body.appendChild(u); } }).catch(() => {});
   setTimeout(check, 5000); setInterval(check, 90000); addEventListener('visibilitychange', () => { if(!document.hidden) check(); }); }
@@ -825,6 +827,7 @@ function pickUpdate(){
 }
 function pickStep(d){ const list = SETS[setOf(carKey)], k = list[(list.indexOf(carKey) + d + list.length) % list.length];
   const b = document.querySelector('#cars button[data-car="' + k + '"]'); if(b) b.click(); }
+$('homeBtn').addEventListener('click', goHome);
 $('prevCar').addEventListener('click', () => pickStep(-1)); $('nextCar').addEventListener('click', () => pickStep(1));
 addEventListener('keydown', e => { if($('menu').hidden || (e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) return; if(e.code === 'ArrowLeft') pickStep(-1); if(e.code === 'ArrowRight') pickStep(1); });
 // one Play button: the switch above it picks online or free drive
@@ -1340,7 +1343,18 @@ function start(){
     S.engineOn = false; S.starting = 0; S.engGain = 0; S.rpm = 0; }
   resume();
 }
-function pause(){ S.paused = true; $('menu').hidden = false; $('hud').hidden = true; $('soloBtn').textContent = NET.game ? 'Free drive' : 'Resume'; $('onlineBtn').textContent = NET.game ? 'Resume' : 'Drift online'; }
+function pause(){ S.paused = true; $('menu').hidden = false; $('hud').hidden = true; $('homeBtn').hidden = false; $('soloBtn').textContent = NET.game ? 'Free drive' : 'Resume'; $('onlineBtn').textContent = NET.game ? 'Resume' : 'Drift online'; }
+// back to the garage: leave the session, park the car, show the line-up again (pick a car, cold start again)
+function goHome(){
+  leaveRace();
+  S.started = false; S.paused = false; S.engineOn = false; S.starting = 0; S.coldT = undefined; S.rev = false; S.free = 0; S.rpm = 0; S.amberT = 0;
+  S.intro = 0; for(const k in keys) keys[k] = false;
+  spawn(0); SHOW.cam = null; S.introSide = undefined;
+  $('hud').hidden = true; $('menu').hidden = false; $('homeBtn').hidden = true; $('ignBtn').hidden = true;
+  $('soloBtn').textContent = 'Free drive'; $('onlineBtn').textContent = 'Drift online';
+  if(C !== CARS[carKey]) setCar(carKey);
+  pickUpdate(); renderRaces();
+}
 function resume(){ S.paused = false; $('menu').hidden = true; $('hud').hidden = false; $('board').hidden = !NET.game; setCam(camMode); }
 $('soloBtn').addEventListener('click', () => { saveName(); if(NET.game){ leaveRace(); S.started = false; } if(S.started){ resume(); return; } start(); });
 
