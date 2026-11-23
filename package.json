@@ -1,0 +1,12 @@
+{
+  "name": "dust-yard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dust Yard web games",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^4.1.1"
+  }
+}
