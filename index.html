@@ -1249,6 +1249,7 @@ function initAudio(){
     const comp = AC.createDynamicsCompressor(); uwLP = AC.createBiquadFilter(); uwLP.type = 'lowpass'; uwLP.frequency.value = 20000; master.connect(uwLP); uwLP.connect(comp); comp.connect(AC.destination);
     noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
     const d = noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
+    if(typeof loadShowSnd === 'function') loadShowSnd();   // preload the airshow jet clip
   }catch(e){ AC = null; }
 }
 function outNode(vol, pan){
@@ -4468,32 +4469,32 @@ function airshowTick(dt, t){
   if(!SHOW.started) startShow();
   dt = Math.min(dt, 0.05); SHOW.t += dt;
   const V = SHOW.V;
-  let desired = SHOW.hdg, targetY, maxRate;
+  let targetY;
   if(SHOW.phase === 'straight'){
-    const base = SHOW.dir > 0 ? 0 : Math.PI;
-    const zErr = SHOW.z - SHOW.passZ;                                  // steer back onto the pass line
-    desired = base + (SHOW.dir > 0 ? -1 : 1)*clamp(zErr*0.02, -0.45, 0.45);
-    targetY = SHOW.gy + PASS_Y; maxRate = 0.7;
+    // low pass across the field; steer back onto the pass line
+    const base = SHOW.dir > 0 ? 0 : Math.PI, zErr = SHOW.z - SHOW.passZ;
+    let desired = base + (SHOW.dir > 0 ? -1 : 1)*clamp(zErr*0.02, -0.45, 0.45);
+    let d = desired - SHOW.hdg; while(d > Math.PI) d -= 2*Math.PI; while(d < -Math.PI) d += 2*Math.PI;
+    const turn = clamp(d, -0.7*dt, 0.7*dt); SHOW.hdg += turn;
+    SHOW.x += Math.cos(SHOW.hdg)*V*dt; SHOW.z += Math.sin(SHOW.hdg)*V*dt;
+    SHOW.roll += (clamp((turn/dt)/0.7, -1, 1)*0.4 - SHOW.roll)*(1 - Math.exp(-dt*3.5));
+    targetY = SHOW.gy + PASS_Y;
     if(!SHOW.rolled && Math.abs(SHOW.x - SHOW.cx) < 12){ SHOW.rolling = true; SHOW.rollT = 0; SHOW.rolled = true; }   // roll over the middle
-    if((SHOW.dir > 0 && SHOW.x > SHOW.cx + FIELD) || (SHOW.dir < 0 && SHOW.x < SHOW.cx - FIELD)){
-      SHOW.phase = 'turn'; SHOW.tacc = 0; SHOW.tcx = SHOW.cx + SHOW.dir*FIELD; SHOW.tcz = SHOW.cz;        // hard turn at the field end
+    if((SHOW.dir > 0 && SHOW.x > SHOW.cx + FIELD) || (SHOW.dir < 0 && SHOW.x < SHOW.cx - FIELD)){                      // peel into the climbing turn
+      SHOW.phase = 'turn'; SHOW.tcx = SHOW.cx + SHOW.dir*FIELD; SHOW.tcz = SHOW.cz; SHOW.tacc = 0;
+      SHOW.tEntryAng = Math.atan2(SHOW.z - SHOW.tcz, SHOW.x - SHOW.tcx); SHOW.tsign = 1;
     }
   } else {
-    const dx = SHOW.x - SHOW.tcx, dz = SHOW.z - SHOW.tcz, al = Math.atan2(dz, dx);
-    const err = (Math.hypot(dx, dz) - TURN_R)/TURN_R;
-    desired = al + Math.PI/2 - clamp(err, -0.6, 0.6);                   // CCW around the end, holding the radius
-    const frac = clamp(SHOW.tacc/Math.PI, 0, 1);
-    targetY = SHOW.gy + PASS_Y + TURN_CLIMB*Math.sin(frac*Math.PI);     // pull up, then back down onto the deck
-    maxRate = 2.4;                                                      // high-G
-    if(SHOW.tacc >= Math.PI - 0.04){ SHOW.phase = 'straight'; SHOW.dir = -SHOW.dir; SHOW.passZ = SHOW.cz - SHOW.dir*TURN_R; SHOW.rolled = false; }
+    // exact arc around the field end: a guaranteed 180, can't diverge. High-G, climbs then descends.
+    SHOW.tacc += (V/TURN_R)*dt;
+    const ang = SHOW.tEntryAng + SHOW.tsign*Math.min(SHOW.tacc, Math.PI);
+    SHOW.x = SHOW.tcx + Math.cos(ang)*TURN_R; SHOW.z = SHOW.tcz + Math.sin(ang)*TURN_R;
+    SHOW.hdg = ang + SHOW.tsign*Math.PI/2;
+    SHOW.roll += (SHOW.tsign*1.15 - SHOW.roll)*(1 - Math.exp(-dt*3.5));
+    targetY = SHOW.gy + PASS_Y + TURN_CLIMB*Math.sin(clamp(SHOW.tacc/Math.PI, 0, 1)*Math.PI);
+    if(SHOW.tacc >= Math.PI){ SHOW.phase = 'straight'; SHOW.dir = -SHOW.dir; SHOW.passZ = SHOW.cz - SHOW.dir*TURN_R; SHOW.rolled = false; }
   }
-  let d = desired - SHOW.hdg; while(d > Math.PI) d -= 2*Math.PI; while(d < -Math.PI) d += 2*Math.PI;
-  const turn = clamp(d, -maxRate*dt, maxRate*dt);
-  SHOW.hdg += turn; if(SHOW.phase === 'turn') SHOW.tacc += Math.abs(turn);
-  SHOW.x += Math.cos(SHOW.hdg)*V*dt; SHOW.z += Math.sin(SHOW.hdg)*V*dt;
   const py0 = SHOW.y; SHOW.y += (targetY - SHOW.y)*(1 - Math.exp(-dt*0.9)); const vy = (SHOW.y - py0)/Math.max(dt, 1e-3);
-  const bankTarget = clamp((turn/dt)/maxRate, -1, 1)*(SHOW.phase === 'turn' ? 1.15 : 0.5);
-  SHOW.roll += (bankTarget - SHOW.roll)*(1 - Math.exp(-dt*3.5));
   if(SHOW.rolling){ SHOW.rollT += dt; const u = clamp(SHOW.rollT/1.1, 0, 1); SHOW.spin = 2*Math.PI*(u*u*(3 - 2*u)); if(SHOW.rollT >= 1.1){ SHOW.rolling = false; SHOW.spin = 0; } }
   const pitch = clamp(Math.atan2(vy, V), -0.45, 0.6);
   const f = new V3(Math.cos(SHOW.hdg)*Math.cos(pitch), Math.sin(pitch), Math.sin(SHOW.hdg)*Math.cos(pitch)).normalize();
@@ -4521,9 +4522,10 @@ function showJetAudio(){
     src.start(0, Math.random()*JET_BUF.duration); showSnd = { src, g, pan };
   }
   const sp = spatial(new V3(SHOW.x, SHOW.y, SHOW.z)), at = AC.currentTime;
+  if(!isFinite(sp.d)) return;
   const vol = Math.min(1.2, 90/(sp.d + 16));   // loud on the low pass, fades with distance
   showSnd.g.gain.setTargetAtTime(vol, at, 0.08);
-  if(showSnd.pan) showSnd.pan.pan.setTargetAtTime(sp.pan, at, 0.08);
+  if(showSnd.pan) showSnd.pan.pan.setTargetAtTime(clamp(sp.pan || 0, -1, 1), at, 0.08);
 }
 function frame(){
   requestAnimationFrame(frame);
