@@ -4414,24 +4414,47 @@ function update(dt, t){
   sendPresence(t);
   updateHUD(dt, t);
 }
-/* ---------------- Airshow: an F-16 buzzes the compound, then circles high overhead ---------------- */
-const SHOW = { g:null, ready:false, started:false, t:0, x:0, y:0, z:0, hdg:0, roll:0, orbit:false, cx:0, cz:0, gy:0, ocx:0, ocz:0, R:60, V:72 };
+/* ---------------- Airshow: an F-16 runs low passes over the compound with hard climbing turns ----------------
+   Racetrack: a low pass across the field, a high-G climbing turn at the end to reverse, then back low again.
+   A roll over the middle of each pass, and a ground shadow that sharpens on the deck. */
+const FIELD = 66, TURN_R = 34, PASS_Y = 22, TURN_CLIMB = 46;
+const SHOW = { g:null, shadow:null, ready:false, started:false, t:0, x:0, y:0, z:0, hdg:0, roll:0, spin:0,
+  phase:'straight', dir:1, passZ:0, tcx:0, tcz:0, tacc:0, rolling:false, rollT:0, rolled:false,
+  cx:0, cz:0, gy:0, V:78 };
 let JET_BUF = null, jetSndLoading = false, showSnd = null;
+function jetShadowTex(){
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128; const x = c.getContext('2d');
+  x.translate(128, 64); x.fillStyle = '#000'; x.shadowColor = '#000'; x.shadowBlur = 10;
+  const P = (pts) => { x.beginPath(); x.moveTo(pts[0][0], pts[0][1]); for(let i = 1; i < pts.length; i++) x.lineTo(pts[i][0], pts[i][1]); x.closePath(); x.fill(); };
+  // nose -> +X (right). fuselage
+  P([[120,0],[70,-9],[-80,-11],[-104,-6],[-104,6],[-80,11],[70,9]]);
+  P([[20,-8],[-6,-54],[-26,-54],[-34,-8]]);   // left wing (swept)
+  P([[20,8],[-6,54],[-26,54],[-34,8]]);        // right wing
+  P([[-78,-6],[-96,-30],[-108,-30],[-100,-6]]); // left tailplane
+  P([[-78,6],[-96,30],[-108,30],[-100,6]]);     // right tailplane
+  const t = new THREE.CanvasTexture(c); t.needsUpdate = true; return t;
+}
 function setupShowjet(gl){
   const m = gl.scene;
-  m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; o.frustumCulled = false;
-    const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if(mt){ mt.fog = false; mt.needsUpdate = true; } }); } });   // stays crisp above the haze
+  m.traverse(o => {
+    if(/landingOn/i.test(o.name || '')) o.visible = false;        // gear up: hide the extended-gear meshes, keep landingOff
+    if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; o.frustumCulled = false;
+      const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if(mt){ mt.fog = false; mt.needsUpdate = true; } }); }   // stays crisp above the haze
+  });
   let box = new THREE.Box3().setFromObject(m); const sz = box.getSize(new V3());
   m.scale.setScalar(20/Math.max(sz.x, sz.y, sz.z));                  // ~20 m long
   box = new THREE.Box3().setFromObject(m); const c = box.getCenter(new V3()); m.position.sub(c);   // centre on origin
   const inner = new THREE.Group(); inner.add(m); inner.rotation.y = -Math.PI/2;                    // nose (+X) -> forward (+Z)
   SHOW.g = new THREE.Group(); SHOW.g.add(inner); SHOW.g.visible = false; scene.add(SHOW.g);
+  const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map:jetShadowTex(), transparent:true, opacity:0, depthWrite:false, color:0x000000, fog:false }));
+  sh.visible = false; scene.add(sh); SHOW.shadow = sh;
   SHOW.ready = true;
 }
 function startShow(){
-  SHOW.cx = 0; SHOW.cz = 0; SHOW.gy = 0; SHOW.t = 0; SHOW.orbit = false; SHOW.started = true;
-  SHOW.hdg = 0; SHOW.roll = 0; SHOW.x = SHOW.cx - 180; SHOW.z = SHOW.cz; SHOW.y = SHOW.gy + 26;   // out to the side, low, lined up to cross the field
-  if(SHOW.g) SHOW.g.visible = true;
+  SHOW.cx = 0; SHOW.cz = 0; SHOW.gy = 0; SHOW.t = 0; SHOW.started = true;
+  SHOW.phase = 'straight'; SHOW.dir = 1; SHOW.passZ = SHOW.cz - TURN_R; SHOW.rolled = false; SHOW.rolling = false; SHOW.spin = 0;
+  SHOW.hdg = 0; SHOW.roll = 0; SHOW.x = SHOW.cx - 150; SHOW.z = SHOW.passZ; SHOW.y = SHOW.gy + PASS_Y;
+  if(SHOW.g) SHOW.g.visible = true; if(SHOW.shadow) SHOW.shadow.visible = true;
 }
 function orientShow(obj, pos, fwd, roll){
   const up0 = new V3(0, 1, 0);
@@ -4444,33 +4467,52 @@ function airshowTick(dt, t){
   if(!SHOW.ready) return;
   if(!SHOW.started) startShow();
   dt = Math.min(dt, 0.05); SHOW.t += dt;
-  const V = SHOW.V, R = SHOW.R;
-  let desired = SHOW.hdg, targetY;
-  if(!SHOW.orbit){
-    desired = 0; targetY = SHOW.gy + 26;                   // straight +X pass across the compound, low
-    if(SHOW.x > SHOW.cx + 20){ SHOW.ocx = SHOW.cx; SHOW.ocz = SHOW.cz; SHOW.orbit = true; }   // then circle directly above the field
-  }
-  if(SHOW.orbit){
-    const dx = SHOW.x - SHOW.ocx, dz = SHOW.z - SHOW.ocz, al = Math.atan2(dz, dx);
-    const err = (Math.hypot(dx, dz) - R)/R;
-    desired = al + Math.PI/2 - clamp(err, -0.6, 0.6);
-    targetY = SHOW.gy + 50 + 9*Math.sin(SHOW.t*0.5);       // overhead, gentle porpoise
+  const V = SHOW.V;
+  let desired = SHOW.hdg, targetY, maxRate;
+  if(SHOW.phase === 'straight'){
+    const base = SHOW.dir > 0 ? 0 : Math.PI;
+    const zErr = SHOW.z - SHOW.passZ;                                  // steer back onto the pass line
+    desired = base + (SHOW.dir > 0 ? -1 : 1)*clamp(zErr*0.02, -0.45, 0.45);
+    targetY = SHOW.gy + PASS_Y; maxRate = 0.7;
+    if(!SHOW.rolled && Math.abs(SHOW.x - SHOW.cx) < 12){ SHOW.rolling = true; SHOW.rollT = 0; SHOW.rolled = true; }   // roll over the middle
+    if((SHOW.dir > 0 && SHOW.x > SHOW.cx + FIELD) || (SHOW.dir < 0 && SHOW.x < SHOW.cx - FIELD)){
+      SHOW.phase = 'turn'; SHOW.tacc = 0; SHOW.tcx = SHOW.cx + SHOW.dir*FIELD; SHOW.tcz = SHOW.cz;        // hard turn at the field end
+    }
+  } else {
+    const dx = SHOW.x - SHOW.tcx, dz = SHOW.z - SHOW.tcz, al = Math.atan2(dz, dx);
+    const err = (Math.hypot(dx, dz) - TURN_R)/TURN_R;
+    desired = al + Math.PI/2 - clamp(err, -0.6, 0.6);                   // CCW around the end, holding the radius
+    const frac = clamp(SHOW.tacc/Math.PI, 0, 1);
+    targetY = SHOW.gy + PASS_Y + TURN_CLIMB*Math.sin(frac*Math.PI);     // pull up, then back down onto the deck
+    maxRate = 2.4;                                                      // high-G
+    if(SHOW.tacc >= Math.PI - 0.04){ SHOW.phase = 'straight'; SHOW.dir = -SHOW.dir; SHOW.passZ = SHOW.cz - SHOW.dir*TURN_R; SHOW.rolled = false; }
   }
   let d = desired - SHOW.hdg; while(d > Math.PI) d -= 2*Math.PI; while(d < -Math.PI) d += 2*Math.PI;
-  const rate = 0.5, turn = clamp(d, -rate*dt, rate*dt);
-  SHOW.hdg += turn;
+  const turn = clamp(d, -maxRate*dt, maxRate*dt);
+  SHOW.hdg += turn; if(SHOW.phase === 'turn') SHOW.tacc += Math.abs(turn);
   SHOW.x += Math.cos(SHOW.hdg)*V*dt; SHOW.z += Math.sin(SHOW.hdg)*V*dt;
-  const py0 = SHOW.y; SHOW.y += (targetY - SHOW.y)*(1 - Math.exp(-dt*0.6)); const vy = (SHOW.y - py0)/Math.max(dt, 1e-3);
-  const bankTarget = clamp((turn/dt)/rate, -1, 1)*0.72;
-  SHOW.roll += (bankTarget - SHOW.roll)*(1 - Math.exp(-dt*3));
-  const pitch = clamp(Math.atan2(vy, V), -0.4, 0.4);
+  const py0 = SHOW.y; SHOW.y += (targetY - SHOW.y)*(1 - Math.exp(-dt*0.9)); const vy = (SHOW.y - py0)/Math.max(dt, 1e-3);
+  const bankTarget = clamp((turn/dt)/maxRate, -1, 1)*(SHOW.phase === 'turn' ? 1.15 : 0.5);
+  SHOW.roll += (bankTarget - SHOW.roll)*(1 - Math.exp(-dt*3.5));
+  if(SHOW.rolling){ SHOW.rollT += dt; const u = clamp(SHOW.rollT/1.1, 0, 1); SHOW.spin = 2*Math.PI*(u*u*(3 - 2*u)); if(SHOW.rollT >= 1.1){ SHOW.rolling = false; SHOW.spin = 0; } }
+  const pitch = clamp(Math.atan2(vy, V), -0.45, 0.6);
   const f = new V3(Math.cos(SHOW.hdg)*Math.cos(pitch), Math.sin(pitch), Math.sin(SHOW.hdg)*Math.cos(pitch)).normalize();
-  orientShow(SHOW.g, new V3(SHOW.x, SHOW.y, SHOW.z), f, SHOW.roll);
+  orientShow(SHOW.g, new V3(SHOW.x, SHOW.y, SHOW.z), f, SHOW.roll + SHOW.spin);
+  // ground shadow under the jet: sharper and smaller on the deck, bigger and fainter up high
+  if(SHOW.shadow){
+    const gY = Math.max(groundAt(SHOW.x, SHOW.z), WATER_Y) + 0.12, alt = Math.max(1, SHOW.y - gY);
+    const fwdG = new V3(Math.cos(SHOW.hdg), 0, Math.sin(SHOW.hdg)), yAx = new V3(Math.sin(SHOW.hdg), 0, -Math.cos(SHOW.hdg));
+    SHOW.shadow.position.set(SHOW.x, gY, SHOW.z);
+    SHOW.shadow.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(fwdG, yAx, new V3(0, 1, 0)));
+    const k = 1 + alt*0.014; SHOW.shadow.scale.set(22*k, 15*k, 1);
+    SHOW.shadow.material.opacity = clamp(0.5*(1 - alt/90), 0.04, 0.5);
+  }
   showJetAudio();
 }
 function loadShowSnd(){ if(JET_BUF || jetSndLoading || !AC) return; jetSndLoading = true; fetch('sounds/f16/jet.wav').then(r => r.arrayBuffer()).then(b => AC.decodeAudioData(b, buf => { JET_BUF = buf; jetSndLoading = false; }, () => { jetSndLoading = false; })); }
 function showJetAudio(){
   if(!AC){ return; }
+  if(AC.state === 'suspended'){ try{ AC.resume(); }catch(e){} }
   if(!JET_BUF){ loadShowSnd(); return; }
   if(!showSnd){
     const src = AC.createBufferSource(); src.buffer = JET_BUF; src.loop = true;
@@ -4479,8 +4521,8 @@ function showJetAudio(){
     src.start(0, Math.random()*JET_BUF.duration); showSnd = { src, g, pan };
   }
   const sp = spatial(new V3(SHOW.x, SHOW.y, SHOW.z)), at = AC.currentTime;
-  const vol = Math.min(1.0, 60/(sp.d + 22))*(SHOW.orbit ? 0.9 : 1.35);   // loud on the low pass, fades as it circles
-  showSnd.g.gain.setTargetAtTime(vol, at, 0.1);
+  const vol = Math.min(1.2, 90/(sp.d + 16));   // loud on the low pass, fades with distance
+  showSnd.g.gain.setTargetAtTime(vol, at, 0.08);
   if(showSnd.pan) showSnd.pan.pan.setTargetAtTime(sp.pan, at, 0.08);
 }
 function frame(){
