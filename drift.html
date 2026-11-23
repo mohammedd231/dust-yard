@@ -877,7 +877,7 @@ function step(dt){
     else if(rpm < C.redline*0.42 && S.gear > 1 && !sideways) shift(-1);
   }
   rpm = Math.max(900, wheelRpm*R[S.gear - 1]*C.final);
-  const reverse = brk && vx < 0.6;
+  const reverse = brk && vx < 0.6 && S.engineOn !== false;   // can't reverse before cold start
   // drive force at the wheels (cut while the clutch is in during a shift)
   const onPower = thr && S.shiftT <= 0;
   let drive = 0;
@@ -1006,7 +1006,11 @@ function step(dt){
     if(hit){ S.drift = 0; S.combo = 1; S.driftT = 0; msg('Crashed', '#ff3b2f'); }
     else if(S.idleT > 1.2){ bank(); }
   }
-  S.thr = thr || (freeRev ? 1 : 0); S.brk = brk; S.hb = hb;
+  S.thr = thr || (freeRev ? 1 : 0); S.brk = brk; S.hb = hb; S.hit = hit;
+  // auto-unstick: trying to drive (throttle or reverse) but pinned in place -> pop back to the road
+  const tryingMove = S.engineOn !== false && (thr || reverse);
+  if(S.started && !S.paused && !(S.intro > 0) && tryingMove && Math.abs(vx) < 0.6) stuckT += dt; else stuckT = 0;
+  if(stuckT > 1.5) recover();
 }
 function bank(){
   const pts = Math.round(S.drift);
@@ -1021,6 +1025,7 @@ function shift(d){
 }
 let msgT = 0; function msg(t, col){ $('sMsg').textContent = t; $('sMsg').style.color = col || '#fff'; msgT = 2; }
 let bumpT = 0; function bump(v){ bumpT = 0.25; if(v > 4) crash(v); }
+let stuckT = 0;
 
 /* ---------- sound ----------
    Engine: a four-cylinder buzz built from the firing frequency and its harmonics, pushed
@@ -1325,13 +1330,22 @@ addEventListener('keydown', e => {
   if(e.code === 'KeyE') shift(1);
   if(e.code === 'KeyQ') shift(-1);
   if(e.code === 'KeyM'){ S.manual = !S.manual; store.set('manual', S.manual); msg(S.manual ? 'Manual gears' : 'Automatic gears'); }
-  if(e.code === 'KeyR'){ const n = nearestRoad(S.x, S.z); S.x = n.x; S.z = n.z; S.vx = S.vz = S.r = 0; S.y = hAt(S.x, S.z); S.drift = 0; msg('Back on the road'); }
+  if(e.code === 'KeyR'){ recover(); }
 });
 addEventListener('keyup', e => { keys[e.code] = false; if(e.code === 'Enter') S.rev = false; });
 addEventListener('blur', () => { for(const k in keys) keys[k] = false; });
 function nearestRoad(x, z){
   // the last place we were driving cleanly
-  return S.safe ? S.safe : {x:GRID.x, z:GRID.z};
+  return S.safe ? S.safe : {x:GRID.x, z:GRID.z, h:GRID.h};
+}
+function recover(){
+  const n = nearestRoad(S.x, S.z);
+  S.x = n.x; S.z = n.z;
+  if(n.h !== undefined) S.h = n.h;                       // face the way we were driving, not into a wall
+  S.vx = S.vz = S.r = S.ax = S.ay = 0; S.steer = 0;      // dead stop, wheels straight
+  S.driftMode = false; S.slipR = 0; S.drift = 0; S.hit = false;
+  S.y = hAt(S.x, S.z) + 0.3;                             // drop in cleanly so it never spawns clipped
+  stuckT = 0; msg('Back on the road');
 }
 function start(){
   initAudio(); if(AC && AC.state === 'suspended') AC.resume();
@@ -1541,7 +1555,7 @@ function frame(){
     if(S.started && !(S.intro > 0)){ for(let i = 0; i < 2; i++) step(dt/2); }
     updateCar(dt);
     // remember a clean spot to come back to with R
-    safeT -= dt; if(safeT <= 0 && S.started && S.kmh > 10 && S.slipR < 0.3){ safeT = 1; S.safe = {x:S.x, z:S.z}; }
+    safeT -= dt; if(safeT <= 0 && S.started && S.kmh > 10 && S.slipR < 0.3 && !S.hit){ safeT = 1; S.safe = {x:S.x, z:S.z, h:S.h}; }
     smokeTick(dt); exhTick(dt); engineSound(dt); netTick(dt); hud(dt);
     if(S.started && S.intro > 0) introCamera(dt);
     else if(S.started) positionCamera(dt, false);
