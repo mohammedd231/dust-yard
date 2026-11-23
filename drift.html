@@ -1022,6 +1022,74 @@ function shift(d){
 let msgT = 0; function msg(t, col){ $('sMsg').textContent = t; $('sMsg').style.color = col || '#fff'; msgT = 2; }
 let bumpT = 0; function bump(v){ bumpT = 0.25; if(v > 4) crash(v); }
 
+/* ---------- airshow: an F-16 buzzes the field, then circles high overhead ---------- */
+let PLANE = null, planeLoading = false, planeReady = false;
+const AIR = { t:0, x:0, y:0, z:0, hdg:0, roll:0, started:false, cx:0, cz:0, gy:0, ocx:0, ocz:0, orbit:false, R:105, V:80 };
+function fieldCenter(){
+  if(!HM) return { x:0, z:0, y:0 };
+  const x = HM.x0 + HM.cell*HM.W/2, z = HM.z0 + HM.cell*HM.H/2;
+  return { x, z, y:Math.max(0, hAt(x, z)) };
+}
+function loadPlane(){
+  if(PLANE || planeLoading) return; planeLoading = true;
+  new THREE.GLTFLoader().load('models/drift/f16.glb', gl => {
+    const m = gl.scene;
+    m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.frustumCulled = false; } });
+    let box = new THREE.Box3().setFromObject(m); const sz = box.getSize(new V3());
+    m.scale.setScalar(18/Math.max(sz.x, sz.y, sz.z));                  // ~18 m long
+    box = new THREE.Box3().setFromObject(m); const c = box.getCenter(new V3()); m.position.sub(c);   // centre on origin
+    const inner = new THREE.Group(); inner.add(m); inner.rotation.y = -Math.PI/2;                    // nose (+X) -> flight forward (+Z)
+    PLANE = new THREE.Group(); PLANE.add(inner); PLANE.visible = false; scene.add(PLANE);
+    planeReady = true;
+  }, undefined, () => { planeLoading = false; });
+}
+function startAirshow(){
+  const f = fieldCenter();
+  AIR.cx = f.x; AIR.cz = f.z; AIR.gy = f.y; AIR.t = 0; AIR.orbit = false; AIR.started = true;
+  AIR.hdg = 0; AIR.roll = 0;
+  AIR.x = f.x - 340; AIR.z = f.z; AIR.y = f.y + 26;      // start far out, low, lined up to cross the field
+  if(PLANE) PLANE.visible = true;
+}
+function orientPlane(obj, pos, fwd, roll){
+  const up0 = new V3(0, 1, 0);
+  let right = new V3().crossVectors(up0, fwd); if(right.lengthSq() < 1e-6) right.set(1, 0, 0); right.normalize();
+  let up = new V3().crossVectors(fwd, right).normalize();
+  if(roll){ const q = new THREE.Quaternion().setFromAxisAngle(fwd, roll); right.applyQuaternion(q); up.applyQuaternion(q); }
+  obj.position.copy(pos); obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd));
+}
+function planeTick(dt){
+  if(!planeReady) return;
+  if(!AIR.started) startAirshow();
+  dt = Math.min(dt, 0.05); AIR.t += dt;
+  const V = AIR.V, R = AIR.R;
+  let desired = AIR.hdg, targetY;
+  if(!AIR.orbit){
+    desired = 0; targetY = AIR.gy + 26;                 // straight +X pass across the field, low
+    if(AIR.x > AIR.cx + 30){                            // past the centre: peel up into an overhead circle
+      AIR.ocx = AIR.x + Math.cos(AIR.hdg + Math.PI/2)*R;  // orbit centre to the left -> the pass is tangent (smooth entry)
+      AIR.ocz = AIR.z + Math.sin(AIR.hdg + Math.PI/2)*R;
+      AIR.orbit = true;
+    }
+  }
+  if(AIR.orbit){
+    const dx = AIR.x - AIR.ocx, dz = AIR.z - AIR.ocz, al = Math.atan2(dz, dx);
+    const err = (Math.hypot(dx, dz) - R)/R;             // nudge back onto the radius
+    desired = al + Math.PI/2 - clamp(err, -0.5, 0.5);
+    targetY = AIR.gy + 92 + 16*Math.sin(AIR.t*0.5);     // high, with a gentle porpoise
+  }
+  let d = desired - AIR.hdg; while(d > Math.PI) d -= 2*Math.PI; while(d < -Math.PI) d += 2*Math.PI;
+  const rate = AIR.orbit ? 0.55 : 0.5, turn = clamp(d, -rate*dt, rate*dt);
+  AIR.hdg += turn;
+  AIR.x += Math.cos(AIR.hdg)*V*dt; AIR.z += Math.sin(AIR.hdg)*V*dt;
+  const py0 = AIR.y; AIR.y += (targetY - AIR.y)*(1 - Math.exp(-dt*0.6)); const vy = (AIR.y - py0)/Math.max(dt, 1e-3);
+  const bankTarget = clamp((turn/dt)/rate, -1, 1)*0.75;                 // bank into the turn
+  AIR.roll += (bankTarget - AIR.roll)*(1 - Math.exp(-dt*3));
+  const pitch = clamp(Math.atan2(vy, V), -0.4, 0.4);
+  const f = new V3(Math.cos(AIR.hdg)*Math.cos(pitch), Math.sin(pitch), Math.sin(AIR.hdg)*Math.cos(pitch)).normalize();
+  orientPlane(PLANE, new V3(AIR.x, AIR.y, AIR.z), f, AIR.roll);
+}
+function stopAirshow(){ AIR.started = false; if(PLANE) PLANE.visible = false; }
+
 /* ---------- sound ----------
    Engine: a four-cylinder buzz built from the firing frequency and its harmonics, pushed
    through a soft-clip and a filter that opens with throttle. Upshifts cut the power and
@@ -1349,7 +1417,7 @@ function goHome(){
   leaveRace();
   S.started = false; S.paused = false; S.engineOn = false; S.starting = 0; S.coldT = undefined; S.rev = false; S.free = 0; S.rpm = 0; S.amberT = 0;
   S.intro = 0; for(const k in keys) keys[k] = false;
-  spawn(0); SHOW.cam = null; S.introSide = undefined;
+  spawn(0); SHOW.cam = null; S.introSide = undefined; stopAirshow();
   $('hud').hidden = true; $('menu').hidden = false; $('homeBtn').hidden = true; $('ignBtn').hidden = true;
   $('soloBtn').textContent = 'Free drive'; $('onlineBtn').textContent = 'Drift online';
   if(C !== CARS[carKey]) setCar(carKey);
@@ -1543,6 +1611,7 @@ function frame(){
     // remember a clean spot to come back to with R
     safeT -= dt; if(safeT <= 0 && S.started && S.kmh > 10 && S.slipR < 0.3){ safeT = 1; S.safe = {x:S.x, z:S.z}; }
     smokeTick(dt); exhTick(dt); engineSound(dt); netTick(dt); hud(dt);
+    if(S.started){ if(!planeReady) loadPlane(); planeTick(dt); }
     if(S.started && S.intro > 0) introCamera(dt);
     else if(S.started) positionCamera(dt, false);
     else showroomCamera(t);

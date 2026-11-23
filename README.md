@@ -24,6 +24,7 @@ W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam 
 - Tachometer (drift HUD): "10k tachometer" model shared by the owner (Sketchfab; check its licence).
 - Tokyo Drift cars (drift game): VeilSide Fortune RX-7, Brian's R34 GT-R, Brian's '95 Eclipse and Dom's VeilSide C-II RX-7 (Classic) models shared by the owner (Sketchfab; check each model's licence before any commercial use).
 - RX-7 rotary (drift game): idle (brap) and high-rev clips from screen recordings the owner shared; anti-lag and bangs from "1200HP Turbo 4-Rotor RX-7 Start-Up" by @ShafeeqLimbada. Same caveat.
+- Airshow F-16 (drift game): "F-16 Fighting Falcon - Fighter Jet - Free" (Sketchfab; check its licence before any commercial use). Scaled and animated along a flight path in-engine.
 - Sniper rifle with arms and animations: "sniper animated" by DJMaesen (https://sketchfab.com/bumstrum), CC BY 4.0. Textures recompressed for the web.
 - Market: "Mini market" by Pasha (https://sketchfab.com/Pasha.), CC BY 4.0. Simplified, relettered as a BIM.
 - Slipper: "BOM SLIPPER" by berkayege (https://sketchfab.com/berkayege), CC BY 4.0.
