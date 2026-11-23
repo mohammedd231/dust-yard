@@ -1025,6 +1025,28 @@ let bumpT = 0; function bump(v){ bumpT = 0.25; if(v > 4) crash(v); }
 /* ---------- airshow: an F-16 buzzes the field, then circles high overhead ---------- */
 let PLANE = null, planeLoading = false, planeReady = false;
 const AIR = { t:0, x:0, y:0, z:0, hdg:0, roll:0, started:false, cx:0, cz:0, gy:0, ocx:0, ocz:0, orbit:false, R:105, V:80 };
+let JET_BUF = null, jetLoading = false, jetA = null;
+function loadJet(){
+  if(JET_BUF || jetLoading || !AC) return; jetLoading = true;
+  fetch('sounds/f16/jet.wav').then(r => r.arrayBuffer()).then(b => AC.decodeAudioData(b, buf => { JET_BUF = buf; jetLoading = false; }, () => { jetLoading = false; }));
+}
+function planeAudioStop(){ if(!jetA) return; try{ jetA.src.stop(); jetA.pan.disconnect(); }catch(e){} jetA = null; }
+function planeAudio(){
+  if(!AC || !A){ return; }
+  if(!JET_BUF){ loadJet(); return; }
+  if(!jetA){
+    const src = AC.createBufferSource(); src.buffer = JET_BUF; src.loop = true;
+    const g = AC.createGain(); g.gain.value = 0;
+    const pan = AC.createPanner(); pan.panningModel = 'equalpower'; pan.distanceModel = 'inverse'; pan.refDistance = 34; pan.rolloffFactor = 0.9; pan.maxDistance = 900;
+    src.connect(g); g.connect(pan); pan.connect(A.master); src.start(0, Math.random()*JET_BUF.duration);
+    jetA = { src, g, pan };
+  }
+  const t = AC.currentTime;
+  if(jetA.pan.positionX){ jetA.pan.positionX.setTargetAtTime(AIR.x, t, 0.03); jetA.pan.positionY.setTargetAtTime(AIR.y, t, 0.03); jetA.pan.positionZ.setTargetAtTime(AIR.z, t, 0.03); }
+  else jetA.pan.setPosition(AIR.x, AIR.y, AIR.z);
+  // a touch louder on the low pass (afterburner), settling as it climbs into the circle
+  jetA.g.gain.setTargetAtTime((AIR.orbit ? 0.85 : 1.25)*V_VOL(), t, 0.1);
+}
 function fieldCenter(){
   if(!HM) return { x:0, z:0, y:0 };
   const x = HM.x0 + HM.cell*HM.W/2, z = HM.z0 + HM.cell*HM.H/2;
@@ -1087,8 +1109,9 @@ function planeTick(dt){
   const pitch = clamp(Math.atan2(vy, V), -0.4, 0.4);
   const f = new V3(Math.cos(AIR.hdg)*Math.cos(pitch), Math.sin(pitch), Math.sin(AIR.hdg)*Math.cos(pitch)).normalize();
   orientPlane(PLANE, new V3(AIR.x, AIR.y, AIR.z), f, AIR.roll);
+  planeAudio();
 }
-function stopAirshow(){ AIR.started = false; if(PLANE) PLANE.visible = false; }
+function stopAirshow(){ AIR.started = false; if(PLANE) PLANE.visible = false; planeAudioStop(); }
 
 /* ---------- sound ----------
    Engine: a four-cylinder buzz built from the firing frequency and its harmonics, pushed
@@ -1558,7 +1581,7 @@ function remoteAudio(r, dt){
 }
 const V_VOL = () => 0.9;
 function netTick(dt){
-  if(A && AC && NET.remotes.size) setListener();
+  if(A && AC && (NET.remotes.size || jetA)) setListener();
   if(!NET.game) return;
   const t = now();
   NET.sendT -= dt; if(S.sendSoon && NET.sendT > 0.03){ NET.sendT = 0.03; } if(NET.sendT <= 0){ S.sendSoon = false; NET.sendT = S.started && !S.paused ? 1/12 : 0.5; sendState(); }
