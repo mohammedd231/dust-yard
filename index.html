@@ -2581,6 +2581,7 @@ function loadModels(){
   const loader = new THREE.GLTFLoader();
   loader.load('models/jetski/jetski.glb', g => { setupJetski(g); loader.load('models/jetski/rider_arms.glb', a => setupRiderArms(a), undefined, () => {}); }, undefined, () => {});
   loader.load('models/heli.glb', g => setupHeli(g), undefined, () => {});
+  loader.load('models/f16.glb', g => setupShowjet(g), undefined, () => {});
   loader.load('models/bim/market.glb', g => setupBimMarket(g), undefined, () => {});
   loader.load('models/bim/slipper.glb', g => setupSlipper(g), undefined, () => {});
   loader.load('models/bim/egg_box.glb', g => setupEggBox(g), undefined, () => {});
@@ -4413,6 +4414,77 @@ function update(dt, t){
   sendPresence(t);
   updateHUD(dt, t);
 }
+/* ---------------- Airshow: an F-16 buzzes the compound, then circles high overhead ---------------- */
+const SHOW = { g:null, ready:false, started:false, t:0, x:0, y:0, z:0, hdg:0, roll:0, orbit:false, cx:0, cz:0, gy:0, ocx:0, ocz:0, R:92, V:88 };
+let JET_BUF = null, jetSndLoading = false, showSnd = null;
+function setupShowjet(gl){
+  const m = gl.scene;
+  m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; o.frustumCulled = false; } });
+  let box = new THREE.Box3().setFromObject(m); const sz = box.getSize(new V3());
+  m.scale.setScalar(20/Math.max(sz.x, sz.y, sz.z));                  // ~20 m long
+  box = new THREE.Box3().setFromObject(m); const c = box.getCenter(new V3()); m.position.sub(c);   // centre on origin
+  const inner = new THREE.Group(); inner.add(m); inner.rotation.y = -Math.PI/2;                    // nose (+X) -> forward (+Z)
+  SHOW.g = new THREE.Group(); SHOW.g.add(inner); SHOW.g.visible = false; scene.add(SHOW.g);
+  SHOW.ready = true;
+}
+function startShow(){
+  SHOW.cx = 0; SHOW.cz = 0; SHOW.gy = 0; SHOW.t = 0; SHOW.orbit = false; SHOW.started = true;
+  SHOW.hdg = 0; SHOW.roll = 0; SHOW.x = SHOW.cx - 380; SHOW.z = SHOW.cz; SHOW.y = SHOW.gy + 34;   // far out, low, lined up to cross the field
+  if(SHOW.g) SHOW.g.visible = true;
+}
+function orientShow(obj, pos, fwd, roll){
+  const up0 = new V3(0, 1, 0);
+  let right = new V3().crossVectors(up0, fwd); if(right.lengthSq() < 1e-6) right.set(1, 0, 0); right.normalize();
+  let up = new V3().crossVectors(fwd, right).normalize();
+  if(roll){ const q = new THREE.Quaternion().setFromAxisAngle(fwd, roll); right.applyQuaternion(q); up.applyQuaternion(q); }
+  obj.position.copy(pos); obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd));
+}
+function airshowTick(dt, t){
+  if(!SHOW.ready) return;
+  if(!SHOW.started) startShow();
+  dt = Math.min(dt, 0.05); SHOW.t += dt;
+  const V = SHOW.V, R = SHOW.R;
+  let desired = SHOW.hdg, targetY;
+  if(!SHOW.orbit){
+    desired = 0; targetY = SHOW.gy + 34;                   // straight +X pass across the compound, low
+    if(SHOW.x > SHOW.cx + 30){                             // past the centre: peel up into an overhead circle
+      SHOW.ocx = SHOW.x + Math.cos(SHOW.hdg + Math.PI/2)*R; SHOW.ocz = SHOW.z + Math.sin(SHOW.hdg + Math.PI/2)*R;
+      SHOW.orbit = true;
+    }
+  }
+  if(SHOW.orbit){
+    const dx = SHOW.x - SHOW.ocx, dz = SHOW.z - SHOW.ocz, al = Math.atan2(dz, dx);
+    const err = (Math.hypot(dx, dz) - R)/R;
+    desired = al + Math.PI/2 - clamp(err, -0.5, 0.5);
+    targetY = SHOW.gy + 80 + 14*Math.sin(SHOW.t*0.5);      // high, gentle porpoise
+  }
+  let d = desired - SHOW.hdg; while(d > Math.PI) d -= 2*Math.PI; while(d < -Math.PI) d += 2*Math.PI;
+  const rate = 0.5, turn = clamp(d, -rate*dt, rate*dt);
+  SHOW.hdg += turn;
+  SHOW.x += Math.cos(SHOW.hdg)*V*dt; SHOW.z += Math.sin(SHOW.hdg)*V*dt;
+  const py0 = SHOW.y; SHOW.y += (targetY - SHOW.y)*(1 - Math.exp(-dt*0.6)); const vy = (SHOW.y - py0)/Math.max(dt, 1e-3);
+  const bankTarget = clamp((turn/dt)/rate, -1, 1)*0.72;
+  SHOW.roll += (bankTarget - SHOW.roll)*(1 - Math.exp(-dt*3));
+  const pitch = clamp(Math.atan2(vy, V), -0.4, 0.4);
+  const f = new V3(Math.cos(SHOW.hdg)*Math.cos(pitch), Math.sin(pitch), Math.sin(SHOW.hdg)*Math.cos(pitch)).normalize();
+  orientShow(SHOW.g, new V3(SHOW.x, SHOW.y, SHOW.z), f, SHOW.roll);
+  showJetAudio();
+}
+function loadShowSnd(){ if(JET_BUF || jetSndLoading || !AC) return; jetSndLoading = true; fetch('sounds/f16/jet.wav').then(r => r.arrayBuffer()).then(b => AC.decodeAudioData(b, buf => { JET_BUF = buf; jetSndLoading = false; }, () => { jetSndLoading = false; })); }
+function showJetAudio(){
+  if(!AC){ return; }
+  if(!JET_BUF){ loadShowSnd(); return; }
+  if(!showSnd){
+    const src = AC.createBufferSource(); src.buffer = JET_BUF; src.loop = true;
+    const g = AC.createGain(); g.gain.value = 0; let pan = null;
+    if(AC.createStereoPanner){ pan = AC.createStereoPanner(); g.connect(pan); pan.connect(master); } else g.connect(master);
+    src.start(0, Math.random()*JET_BUF.duration); showSnd = { src, g, pan };
+  }
+  const sp = spatial(new V3(SHOW.x, SHOW.y, SHOW.z)), at = AC.currentTime;
+  const vol = Math.min(1.0, 60/(sp.d + 22))*(SHOW.orbit ? 0.9 : 1.35);   // loud on the low pass, fades as it circles
+  showSnd.g.gain.setTargetAtTime(vol, at, 0.1);
+  if(showSnd.pan) showSnd.pan.pan.setTargetAtTime(sp.pan, at, 0.08);
+}
 function frame(){
   requestAnimationFrame(frame);
   const t = now(); const dt = Math.min(0.05, t - last); last = t;
@@ -4420,6 +4492,7 @@ function frame(){
   bimTick(dt, t);
   heliTick(dt, t);
   jetTick(dt, t);
+  airshowTick(dt, t);
   doorTick(dt); doorPromptTick();
   if(deployed) update(dt, t);
   else {

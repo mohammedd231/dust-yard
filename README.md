@@ -32,6 +32,7 @@ W/↑ throttle · S/↓ brake/reverse · A D steer · C camera (cockpit / T-cam 
 - Helicopter: "EC 135" by GRIP420 (https://sketchfab.com/GRIP420), CC BY 4.0. Textures recompressed and mesh simplified for the web.
 - Jet ski: "Jetski" by cm21 (Sketchfab), CC BY 4.0. Textures recompressed and mesh simplified for the web.
 - Jet ski rider arms: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), CC BY 4.0. Posed to hold the handlebars.
+- Airshow F-16: "F-16 Fighting Falcon - Fighter Jet - Free" (Sketchfab; check its licence before any commercial use). Scaled and flown along an in-engine flight path, with engine sound from the owner's flyby clip. Ambient scenery only.
 
 ## Drift (`/drift`)
 Drift a Mazda RX-7, an Acura Integra or a JDM drift car around Cougar Circuit, alone or with friends online. W/S throttle and brake, A/D steer, Space handbrake, E/Q shift (M for manual), R back on the road.
