@@ -4415,11 +4415,12 @@ function update(dt, t){
   updateHUD(dt, t);
 }
 /* ---------------- Airshow: an F-16 buzzes the compound, then circles high overhead ---------------- */
-const SHOW = { g:null, ready:false, started:false, t:0, x:0, y:0, z:0, hdg:0, roll:0, orbit:false, cx:0, cz:0, gy:0, ocx:0, ocz:0, R:92, V:88 };
+const SHOW = { g:null, ready:false, started:false, t:0, x:0, y:0, z:0, hdg:0, roll:0, orbit:false, cx:0, cz:0, gy:0, ocx:0, ocz:0, R:60, V:72 };
 let JET_BUF = null, jetSndLoading = false, showSnd = null;
 function setupShowjet(gl){
   const m = gl.scene;
-  m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; o.frustumCulled = false; } });
+  m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; o.frustumCulled = false;
+    const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(mt => { if(mt){ mt.fog = false; mt.needsUpdate = true; } }); } });   // stays crisp above the haze
   let box = new THREE.Box3().setFromObject(m); const sz = box.getSize(new V3());
   m.scale.setScalar(20/Math.max(sz.x, sz.y, sz.z));                  // ~20 m long
   box = new THREE.Box3().setFromObject(m); const c = box.getCenter(new V3()); m.position.sub(c);   // centre on origin
@@ -4429,7 +4430,7 @@ function setupShowjet(gl){
 }
 function startShow(){
   SHOW.cx = 0; SHOW.cz = 0; SHOW.gy = 0; SHOW.t = 0; SHOW.orbit = false; SHOW.started = true;
-  SHOW.hdg = 0; SHOW.roll = 0; SHOW.x = SHOW.cx - 380; SHOW.z = SHOW.cz; SHOW.y = SHOW.gy + 34;   // far out, low, lined up to cross the field
+  SHOW.hdg = 0; SHOW.roll = 0; SHOW.x = SHOW.cx - 180; SHOW.z = SHOW.cz; SHOW.y = SHOW.gy + 26;   // out to the side, low, lined up to cross the field
   if(SHOW.g) SHOW.g.visible = true;
 }
 function orientShow(obj, pos, fwd, roll){
@@ -4446,17 +4447,14 @@ function airshowTick(dt, t){
   const V = SHOW.V, R = SHOW.R;
   let desired = SHOW.hdg, targetY;
   if(!SHOW.orbit){
-    desired = 0; targetY = SHOW.gy + 34;                   // straight +X pass across the compound, low
-    if(SHOW.x > SHOW.cx + 30){                             // past the centre: peel up into an overhead circle
-      SHOW.ocx = SHOW.x + Math.cos(SHOW.hdg + Math.PI/2)*R; SHOW.ocz = SHOW.z + Math.sin(SHOW.hdg + Math.PI/2)*R;
-      SHOW.orbit = true;
-    }
+    desired = 0; targetY = SHOW.gy + 26;                   // straight +X pass across the compound, low
+    if(SHOW.x > SHOW.cx + 20){ SHOW.ocx = SHOW.cx; SHOW.ocz = SHOW.cz; SHOW.orbit = true; }   // then circle directly above the field
   }
   if(SHOW.orbit){
     const dx = SHOW.x - SHOW.ocx, dz = SHOW.z - SHOW.ocz, al = Math.atan2(dz, dx);
     const err = (Math.hypot(dx, dz) - R)/R;
-    desired = al + Math.PI/2 - clamp(err, -0.5, 0.5);
-    targetY = SHOW.gy + 80 + 14*Math.sin(SHOW.t*0.5);      // high, gentle porpoise
+    desired = al + Math.PI/2 - clamp(err, -0.6, 0.6);
+    targetY = SHOW.gy + 50 + 9*Math.sin(SHOW.t*0.5);       // overhead, gentle porpoise
   }
   let d = desired - SHOW.hdg; while(d > Math.PI) d -= 2*Math.PI; while(d < -Math.PI) d += 2*Math.PI;
   const rate = 0.5, turn = clamp(d, -rate*dt, rate*dt);
