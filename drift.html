@@ -189,6 +189,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="touch-controls.js"></script>
 <script>
 (() => {
@@ -855,7 +856,10 @@ function torqueAt(rpm){ const x = rpm/C.redline; return clamp(0.62 + 0.75*x - 0.
 function step(dt){
   if(!C) return;
   let thr = keys.KeyW || keys.ArrowUp ? 1 : 0, brk = keys.KeyS || keys.ArrowDown ? 1 : 0, hb = keys.Space ? 1 : 0;
-  const st = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0);
+  let st = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0);
+  if(typeof WHEEL !== 'undefined' && WHEEL.on && performance.now() - WHEEL.last < 900){   // phone used as a wheel: analog tilt steering
+    st = clamp(WHEEL.s, -1, 1); thr = Math.max(thr, WHEEL.g); brk = Math.max(brk, WHEEL.b); hb = Math.max(hb, WHEEL.h); S.rev = !!WHEEL.r;
+  }
   if(S.paused){ thr = brk = 0; hb = 1; }
   if(S.engineOn === false) thr = 0;   // cold start first
   const freeRev = S.rev && S.engineOn !== false && !S.paused; if(freeRev) thr = 0;   // revving in neutral: the car stays put
@@ -1375,6 +1379,44 @@ function initLobby(){
   NET.lobby.subscribe(st => { if(st === 'SUBSCRIBED'){ NET.lobbyOk = true; lobbyTrack(); renderRaces(); } });
 }
 function lobbyTrack(){ if(NET.lobby && NET.lobbyOk) try{ const p = NET.lobby.track({n:myName, r:NET.raceId, t:Date.now()}); if(p && p.catch) p.catch(() => {}); }catch(e){} }
+
+/* ---------- phone used as a steering wheel (tilt streamed over realtime) ---------- */
+const WHEEL = { on:false, s:0, g:0, b:0, h:0, r:0, last:0, ch:null, room:'' };
+function wheelSB(){ if(NET.sb) return NET.sb; try{ if(window.supabase) NET.sb = window.supabase.createClient(SB_URL, SB_KEY, {auth:{persistSession:false, autoRefreshToken:false}, realtime:{params:{eventsPerSecond:40}}}); }catch(e){} return NET.sb; }
+function wheelStatus(){ $('wheelMsg').textContent = WHEEL.on ? 'Phone connected — hold it like a wheel and steer.' : 'Phone found — tap Connect on the phone and allow motion.'; $('wheelDot').classList.add('ok'); }
+function wheelAck(){ try{ WHEEL.ch && WHEEL.ch.send({type:'broadcast', event:'ack', payload:{}}); }catch(e){} wheelStatus(); }
+function makeQR(url){ const host = $('wheelQR'); host.innerHTML = '';
+  try{ const q = qrcode(0, 'M'); q.addData(url); q.make(); host.innerHTML = q.createSvgTag({cellSize:5, margin:2}); const s = host.querySelector('svg'); if(s){ s.style.cssText = 'width:184px;height:184px;background:#fff;border-radius:10px;padding:6px'; } }
+  catch(e){ host.textContent = 'Type the link below on your phone.'; } }
+function openWheel(){
+  const sb = wheelSB(), box = $('wheelPair'); box.hidden = false;
+  if(!sb){ $('wheelMsg').textContent = 'Online service is unavailable right now.'; return; }
+  if(!WHEEL.room){
+    WHEEL.room = Array.from(crypto.getRandomValues(new Uint8Array(4)), b => (b % 36).toString(36)).join('');
+    const url = location.origin + location.pathname.replace(/[^/]*$/, '') + 'wheel#' + WHEEL.room;
+    $('wheelLink').textContent = url.replace(/^https?:\/\//, ''); $('wheelLink').href = url; $('wheelCode').textContent = WHEEL.room.toUpperCase(); makeQR(url);
+    WHEEL.ch = sb.channel('dydrift-wheel-' + WHEEL.room, {config:{broadcast:{self:false, ack:false}}});
+    WHEEL.ch.on('broadcast', {event:'hi'}, () => wheelAck());
+    WHEEL.ch.on('broadcast', {event:'w'}, m => { const p = m && m.payload; if(!p) return; WHEEL.on = true; WHEEL.last = performance.now(); WHEEL.s = +p.s || 0; WHEEL.g = +p.g || 0; WHEEL.b = +p.b || 0; WHEEL.h = +p.h || 0; WHEEL.r = +p.r || 0; wheelStatus(); });
+    WHEEL.ch.on('broadcast', {event:'start'}, () => coldStart());
+    WHEEL.ch.subscribe();
+  }
+}
+(function wheelUI(){
+  const css = document.createElement('style');
+  css.textContent = '#wheelBtn{position:fixed;left:14px;bottom:14px;z-index:40;display:none;align-items:center;gap:8px;padding:11px 16px;border:1px solid rgba(255,255,255,.18);border-radius:12px;background:rgba(14,16,28,.85);color:#fff;font:700 14px system-ui;cursor:pointer;backdrop-filter:blur(8px)}#wheelBtn:hover{border-color:#ff2fd6}#wheelPair{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(5,6,12,.82);backdrop-filter:blur(6px)}#wheelPair .cardw{width:min(92vw,380px);background:#0c0e18;border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:22px;text-align:center;color:#eef0f8;font-family:system-ui}#wheelPair h3{margin:0 0 4px;font-size:20px}#wheelPair p{color:#9aa1bd;font-size:13px;margin:6px 0;line-height:1.5}#wheelQR{margin:14px auto;min-height:184px;display:flex;align-items:center;justify-content:center}#wheelLink{color:#2fa8ff;word-break:break-all;font-size:13px}#wheelCode{font:800 22px system-ui;letter-spacing:.2em;color:#fff}#wheelStat{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font-size:13px}#wheelDot{width:9px;height:9px;border-radius:50%;background:#ff3b4a}#wheelDot.ok{background:#2bff5a}#wheelPair .x{margin-top:16px;border:1px solid rgba(255,255,255,.18);background:transparent;color:#fff;border-radius:10px;padding:10px 18px;font-weight:700;cursor:pointer}';
+  document.head.appendChild(css);
+  const b = document.createElement('button'); b.id = 'wheelBtn'; b.type = 'button'; b.textContent = '📱 Phone wheel'; document.body.appendChild(b);
+  const o = document.createElement('div'); o.id = 'wheelPair'; o.hidden = true;
+  o.innerHTML = '<div class="cardw"><h3>Use your phone as the wheel</h3><p>On your phone, scan this (or open the link), tap <b>Connect</b>, then hold the phone like a steering wheel and turn it.</p><div id="wheelQR"></div><a id="wheelLink" target="_blank" rel="noopener"></a><p>Room code <span id="wheelCode"></span></p><div id="wheelStat"><span id="wheelDot"></span><span id="wheelMsg">Waiting for your phone…</span></div><button class="x" type="button">Close</button></div>';
+  document.body.appendChild(o);
+  b.addEventListener('click', openWheel);
+  o.querySelector('.x').addEventListener('click', () => o.hidden = true);
+  o.addEventListener('click', e => { if(e.target === o) o.hidden = true; });
+  const sync = () => { b.style.display = $('menu') && !$('menu').hidden ? 'inline-flex' : 'none'; };
+  try{ new MutationObserver(sync).observe($('menu'), {attributes:true, attributeFilter:['hidden']}); }catch(e){}
+  sync();
+})();
 function listRaces(){
   if(!NET.lobby || !NET.lobbyOk) return [];
   const st = NET.lobby.presenceState(), map = new Map();
