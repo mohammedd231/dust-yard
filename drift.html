@@ -1413,7 +1413,7 @@ function openWheel(){
   b.addEventListener('click', openWheel);
   o.querySelector('.x').addEventListener('click', () => o.hidden = true);
   o.addEventListener('click', e => { if(e.target === o) o.hidden = true; });
-  const WHEEL_LIVE = true;   // phone-wheel button shown on the menu
+  const WHEEL_LIVE = false;   // phone-wheel button hidden for now; set true to show it again
   const sync = () => { b.style.display = WHEEL_LIVE && $('menu') && !$('menu').hidden ? 'inline-flex' : 'none'; };
   try{ new MutationObserver(sync).observe($('menu'), {attributes:true, attributeFilter:['hidden']}); }catch(e){}
   sync();
