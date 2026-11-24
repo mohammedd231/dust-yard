@@ -4418,10 +4418,19 @@ function update(dt, t){
 /* ---------------- Airshow: an F-16 runs low passes over the compound with hard climbing turns ----------------
    Racetrack: a low pass across the field, a high-G climbing turn at the end to reverse, then back low again.
    A roll over the middle of each pass, and a ground shadow that sharpens on the deck. */
-const FIELD = 66, TURN_R = 34, PASS_Y = 22, TURN_CLIMB = 46;
-const SHOW = { g:null, shadow:null, ready:false, started:false, t:0, x:0, y:0, z:0, hdg:0, roll:0, spin:0,
-  phase:'straight', dir:1, passZ:0, tcx:0, tcz:0, tacc:0, rolling:false, rollT:0, rolled:false,
-  cx:0, cz:0, gy:0, V:78 };
+// Real coordinated-turn physics: at the jet's speed it needs a big, steeply banked turn.
+// It orbits a point well off the field so the near part of the arc crosses low over you,
+// then banks away wide and high before coming back around — a real airshow line.
+const ORBIT_R = 200, ORBIT_V = 85, ORBIT_HI = 96, ORBIT_LO = 18;
+const BANK_MAG = Math.atan(ORBIT_V*ORBIT_V/(ORBIT_R*9.8));   // bank angle a real turn of this radius/speed needs
+const SHOW = { g:null, shadow:null, ready:false, started:false, t:0, a:0, x:0, y:0, z:0, hdg:0, roll:0, spin:0,
+  rolling:false, rollT:0, rolled:false, cx:0, cz:0, gy:0 };
+function airPos(a, cx, czc, gy){
+  const x = cx + ORBIT_R*Math.cos(a), z = czc + ORBIT_R*Math.sin(a);
+  const near = clamp((-Math.sin(a) - 0.25)/0.75, 0, 1);          // 1 at the near low pass, 0 out in the wide turn
+  const y = gy + ORBIT_HI - (ORBIT_HI - ORBIT_LO)*(near*near);   // dive onto the deck for the pass, climb away after
+  return { x, y, z, near };
+}
 let JET_BUF = null, jetSndLoading = false, showSnd = null;
 function jetShadowTex(){
   const c = document.createElement('canvas'); c.width = 256; c.height = 128; const x = c.getContext('2d');
@@ -4453,8 +4462,10 @@ function setupShowjet(gl){
 }
 function startShow(){
   SHOW.cx = 0; SHOW.cz = 0; SHOW.gy = 0; SHOW.t = 0; SHOW.started = true;
-  SHOW.phase = 'straight'; SHOW.dir = 1; SHOW.passZ = SHOW.cz - TURN_R; SHOW.rolled = false; SHOW.rolling = false; SHOW.spin = 0;
-  SHOW.hdg = 0; SHOW.roll = 0; SHOW.x = SHOW.cx - 150; SHOW.z = SHOW.passZ; SHOW.y = SHOW.gy + PASS_Y;
+  SHOW.a = -Math.PI/2 - 1.2;                      // begin a little before the low pass, inbound
+  SHOW.rolled = false; SHOW.rolling = false; SHOW.spin = 0; SHOW.roll = 0;
+  const p = airPos(SHOW.a, SHOW.cx, SHOW.cz + ORBIT_R, SHOW.gy);
+  SHOW.x = p.x; SHOW.y = p.y; SHOW.z = p.z; SHOW.hdg = 0;
   if(SHOW.g) SHOW.g.visible = true; if(SHOW.shadow) SHOW.shadow.visible = true;
 }
 function orientShow(obj, pos, fwd, roll){
@@ -4468,37 +4479,18 @@ function airshowTick(dt, t){
   if(!SHOW.ready) return;
   if(!SHOW.started) startShow();
   dt = Math.min(dt, 0.05); SHOW.t += dt;
-  const V = SHOW.V;
-  let targetY;
-  if(SHOW.phase === 'straight'){
-    // low pass across the field; steer back onto the pass line
-    const base = SHOW.dir > 0 ? 0 : Math.PI, zErr = SHOW.z - SHOW.passZ;
-    let desired = base + (SHOW.dir > 0 ? -1 : 1)*clamp(zErr*0.02, -0.45, 0.45);
-    let d = desired - SHOW.hdg; while(d > Math.PI) d -= 2*Math.PI; while(d < -Math.PI) d += 2*Math.PI;
-    const turn = clamp(d, -0.7*dt, 0.7*dt); SHOW.hdg += turn;
-    SHOW.x += Math.cos(SHOW.hdg)*V*dt; SHOW.z += Math.sin(SHOW.hdg)*V*dt;
-    SHOW.roll += (clamp((turn/dt)/0.7, -1, 1)*0.4 - SHOW.roll)*(1 - Math.exp(-dt*3.5));
-    targetY = SHOW.gy + PASS_Y;
-    if(!SHOW.rolled && Math.abs(SHOW.x - SHOW.cx) < 12){ SHOW.rolling = true; SHOW.rollT = 0; SHOW.rolled = true; }   // roll over the middle
-    if((SHOW.dir > 0 && SHOW.x > SHOW.cx + FIELD) || (SHOW.dir < 0 && SHOW.x < SHOW.cx - FIELD)){                      // peel into the climbing turn
-      SHOW.phase = 'turn'; SHOW.tcx = SHOW.cx + SHOW.dir*FIELD; SHOW.tcz = SHOW.cz; SHOW.tacc = 0;
-      SHOW.tEntryAng = Math.atan2(SHOW.z - SHOW.tcz, SHOW.x - SHOW.tcx); SHOW.tsign = 1;
-    }
-  } else {
-    // exact arc around the field end: a guaranteed 180, can't diverge. High-G, climbs then descends.
-    SHOW.tacc += (V/TURN_R)*dt;
-    const ang = SHOW.tEntryAng + SHOW.tsign*Math.min(SHOW.tacc, Math.PI);
-    SHOW.x = SHOW.tcx + Math.cos(ang)*TURN_R; SHOW.z = SHOW.tcz + Math.sin(ang)*TURN_R;
-    SHOW.hdg = ang + SHOW.tsign*Math.PI/2;
-    SHOW.roll += (SHOW.tsign*1.15 - SHOW.roll)*(1 - Math.exp(-dt*3.5));
-    targetY = SHOW.gy + PASS_Y + TURN_CLIMB*Math.sin(clamp(SHOW.tacc/Math.PI, 0, 1)*Math.PI);
-    if(SHOW.tacc >= Math.PI){ SHOW.phase = 'straight'; SHOW.dir = -SHOW.dir; SHOW.passZ = SHOW.cz - SHOW.dir*TURN_R; SHOW.rolled = false; }
-  }
-  const py0 = SHOW.y; SHOW.y += (targetY - SHOW.y)*(1 - Math.exp(-dt*0.9)); const vy = (SHOW.y - py0)/Math.max(dt, 1e-3);
-  if(SHOW.rolling){ SHOW.rollT += dt; const u = clamp(SHOW.rollT/1.1, 0, 1); SHOW.spin = 2*Math.PI*(u*u*(3 - 2*u)); if(SHOW.rollT >= 1.1){ SHOW.rolling = false; SHOW.spin = 0; } }
-  const pitch = clamp(Math.atan2(vy, V), -0.45, 0.6);
-  const f = new V3(Math.cos(SHOW.hdg)*Math.cos(pitch), Math.sin(pitch), Math.sin(SHOW.hdg)*Math.cos(pitch)).normalize();
-  orientShow(SHOW.g, new V3(SHOW.x, SHOW.y, SHOW.z), f, SHOW.roll + SHOW.spin);
+  const czc = SHOW.cz + ORBIT_R;
+  SHOW.a += (ORBIT_V/ORBIT_R)*dt;                                  // realistic slow turn rate = speed / radius
+  const p = airPos(SHOW.a, SHOW.cx, czc, SHOW.gy), p2 = airPos(SHOW.a + 0.03, SHOW.cx, czc, SHOW.gy);
+  const fwd = new V3(p2.x - p.x, p2.y - p.y, p2.z - p.z); if(fwd.lengthSq() < 1e-6) fwd.set(1, 0, 0); fwd.normalize();
+  SHOW.x = p.x; SHOW.y = p.y; SHOW.z = p.z; SHOW.hdg = Math.atan2(fwd.z, fwd.x);
+  // a slow victory roll across the low pass
+  if(p.near > 0.8 && !SHOW.rolled){ SHOW.rolling = true; SHOW.rollT = 0; SHOW.rolled = true; }
+  if(p.near < 0.2) SHOW.rolled = false;
+  if(SHOW.rolling){ SHOW.rollT += dt; const u = clamp(SHOW.rollT/2.3, 0, 1); SHOW.spin = 2*Math.PI*(u*u*(3 - 2*u)); if(SHOW.rollT >= 2.3){ SHOW.rolling = false; SHOW.spin = 0; } }
+  const bankTarget = BANK_MAG*(1 - p.near);                        // hard bank out in the wide turn, wings level on the pass
+  SHOW.roll += (bankTarget - SHOW.roll)*(1 - Math.exp(-dt*2.2));
+  orientShow(SHOW.g, new V3(p.x, p.y, p.z), fwd, SHOW.roll + SHOW.spin);
   // ground shadow under the jet: sharper and smaller on the deck, bigger and fainter up high
   if(SHOW.shadow){
     const gY = Math.max(groundAt(SHOW.x, SHOW.z), WATER_Y) + 0.12, alt = Math.max(1, SHOW.y - gY);
