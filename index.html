@@ -4508,15 +4508,25 @@ function showJetAudio(){
   if(AC.state === 'suspended'){ try{ AC.resume(); }catch(e){} }
   if(!JET_BUF){ loadShowSnd(); return; }
   if(!showSnd){
+    // src -> gain(distance) -> lowpass(air absorption) -> delay(sound travel time) -> pan -> master.
+    // The time-varying delay = distance/speedOfSound reproduces real Doppler (pitch up inbound,
+    // drop as it passes) AND the sound arriving a beat after you see it pass.
     const src = AC.createBufferSource(); src.buffer = JET_BUF; src.loop = true;
-    const g = AC.createGain(); g.gain.value = 0; let pan = null;
-    if(AC.createStereoPanner){ pan = AC.createStereoPanner(); g.connect(pan); pan.connect(master); } else g.connect(master);
-    src.start(0, Math.random()*JET_BUF.duration); showSnd = { src, g, pan };
+    const g = AC.createGain(); g.gain.value = 0;
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 18000;
+    const dl = AC.createDelay(2.0);
+    let pan = AC.createStereoPanner ? AC.createStereoPanner() : null;
+    src.connect(g); g.connect(lp); lp.connect(dl);
+    if(pan){ dl.connect(pan); pan.connect(master); } else dl.connect(master);
+    src.start(0, Math.random()*JET_BUF.duration); showSnd = { src, g, lp, dl, pan };
   }
   const sp = spatial(new V3(SHOW.x, SHOW.y, SHOW.z)), at = AC.currentTime;
   if(!isFinite(sp.d)) return;
-  const vol = Math.min(1.2, 90/(sp.d + 16));   // loud on the low pass, fades with distance
+  const C = 343;                                           // speed of sound (m/s)
+  const vol = Math.min(1.2, 90/(sp.d + 16));               // loud on the low pass, fades with distance
   showSnd.g.gain.setTargetAtTime(vol, at, 0.08);
+  showSnd.dl.delayTime.setTargetAtTime(clamp(sp.d/C, 0, 1.9), at, 0.04);                 // Doppler + propagation lag
+  showSnd.lp.frequency.setTargetAtTime(clamp(2000 + 16000*(1 - sp.d/300), 1400, 18000), at, 0.1);  // distant = duller
   if(showSnd.pan) showSnd.pan.pan.setTargetAtTime(clamp(sp.pan || 0, -1, 1), at, 0.08);
 }
 function frame(){
