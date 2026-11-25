@@ -1101,12 +1101,21 @@ function coldStart(){
     if(buf){ src.buffer = buf; src.connect(g); g.connect(A.master); src.start(); }
     else { src.buffer = A.nb; const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 220; bp.Q.value = 3; const am = AC.createGain(); am.gain.value = 0; const lfo = AC.createOscillator(); lfo.frequency.value = 9; const lg = AC.createGain(); lg.gain.value = 0.5; lfo.connect(lg); lg.connect(am.gain); src.connect(bp); bp.connect(am); am.connect(g); g.connect(A.master); src.start(); lfo.start(); src.stop(AC.currentTime + 1.3); lfo.stop(AC.currentTime + 1.3); }
   }
-  setTimeout(() => {
-    S.engineOn = true; S.starting = 0; S.engGain = buf ? -0.35 : 0.3;   // live engine comes up under the recording's flare and takes over
-    S.coldFrom = buf ? 1150 : 1500; S.coldPeak = buf ? 1450 : 2100; S.coldT = 0; S.rpm = S.coldFrom;
-    for(let i = 0; i < 7; i++) setTimeout(() => exhPuff(1.3), i*45);   // the first cough of smoke
-    $('ignBtn').hidden = true; $('ignBtn').classList.remove('busy'); $('ignBtn').firstChild.textContent = 'Cold start';
-  }, (buf ? fire : 1.3)*1000);
+  // hand over on the AUDIO clock (checked every frame in engineSound), so it lines up with the recording's
+  // scheduled fade even if the main thread is busy; the timeout is just a fallback.
+  S._coldBuf = !!buf;
+  S.coldHandAC = AC ? AC.currentTime + (buf ? fire : 1.3) : undefined;
+  if(!AC) coldHandover();
+  else setTimeout(coldHandover, (buf ? fire : 1.3)*1000 + 60);
+}
+function coldHandover(){
+  if(!S.starting) return;   // already handed over (whichever of the frame-check or the fallback got here first)
+  const buf = S._coldBuf;
+  S.engineOn = true; S.starting = 0; S.engGain = buf ? -0.35 : 0.3;   // live engine comes up under the recording's flare and takes over
+  S.coldFrom = buf ? 1150 : 1500; S.coldPeak = buf ? 1450 : 2100; S.coldT = 0; S.rpm = S.coldFrom;
+  S.coldHandAC = undefined;
+  for(let i = 0; i < 7; i++) setTimeout(() => exhPuff(1.3), i*45);   // the first cough of smoke
+  $('ignBtn').hidden = true; $('ignBtn').classList.remove('busy'); $('ignBtn').firstChild.textContent = 'Cold start';
 }
 $('ignBtn').addEventListener('click', coldStart);
 function samplePop(vol){
@@ -1123,6 +1132,7 @@ const ENGINE_VOICE = {
   rx7:{ fire:2, osc:[['square', 2, 0.32], ['sawtooth', 3, 0.3], ['square', 4, 0.16], ['sawtooth', 1, 0.14]], lp:[900, 3800, 0.55], jitter:0.03, vol:0.85 } };
 ENGINE_VOICE.fortune = ENGINE_VOICE.rx7; ENGINE_VOICE.eclipse = ENGINE_VOICE.integra;
 function engineSound(dt){
+  if(S.starting && S.coldHandAC !== undefined && AC && AC.currentTime >= S.coldHandAC) coldHandover();   // hand over on the audio clock
   if(!A || !C) return;
   const V = ENGINE_VOICE[carKey] || ENGINE_VOICE.jdm;
   if(A.voice !== V){ A.voice = V; A.oscs.forEach((O, i) => { const [type, mul, g] = V.osc[i]; O.o.type = type; O.mul = mul; O.gg.gain.value = g; }); }
