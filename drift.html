@@ -149,7 +149,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <span class="lbl">Time</span>
     <div class="seg" id="tod"><button type="button" data-tod="day" class="on">Day</button><button type="button" data-tod="night">Night</button></div>
     <span class="lbl">Garage</span>
-    <div class="tabs" id="sets"><button type="button" data-set="classic" class="on">Classic<small>3 cars</small></button><button type="button" data-set="tokyo">Tokyo Drift<small>3 cars</small></button></div>
+    <div class="tabs" id="sets"><button type="button" data-set="classic" class="on">Classic<small>3 cars</small></button><button type="button" data-set="tokyo">Night Drifts<small>3 cars</small></button></div>
     <div class="cars" id="cars">
       <button type="button" data-car="rx7" class="on"><b>Mazda RX-7</b><small>Dom's red VeilSide C-II. Tuned rotary, rear-drive, revs to 8,500.</small></button>
       <button type="button" data-car="integra"><b>Acura Integra</b><small>'94 LS sedan, rear-drive swap with a VTEC four. Light and lively.</small></button>
@@ -825,20 +825,88 @@ function pickUpdate(){
   $('stPow').textContent = Math.round(Cc.power/1000) + ' kW'; $('stW').textContent = Cc.mass.toLocaleString() + ' kg';
   $('barPow').style.width = Math.round(Cc.power/3000) + '%'; $('barW').style.width = Math.round((Cc.mass - 900)/7) + '%';
   $('dots').innerHTML = list.map(k => '<i class="' + (k === carKey ? 'on' : '') + '"></i>').join('');
+  if(typeof playSync === 'function') playSync();   // reflect the Unlock/price state for this car
 }
 function pickStep(d){ const list = SETS[setOf(carKey)], k = list[(list.indexOf(carKey) + d + list.length) % list.length];
   const b = document.querySelector('#cars button[data-car="' + k + '"]'); if(b) b.click(); }
 $('homeBtn').addEventListener('click', goHome);
 $('prevCar').addEventListener('click', () => pickStep(-1)); $('nextCar').addEventListener('click', () => pickStep(1));
 addEventListener('keydown', e => { if($('menu').hidden || (e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) return; if(e.code === 'ArrowLeft') pickStep(-1); if(e.code === 'ArrowRight') pickStep(1); });
+// --- paid cars (Night Drifts): ownership comes from the server, the client only reflects it ---
+const PRICE = { fortune:7, r34:7, eclipse:7 };               // paid cars and their price ($)
+const PROD = { fortune:'car:fortune', r34:'car:r34', eclipse:'car:eclipse' };
+const PACK_PRICE = 15, PACK_PROD = 'pack:night';
+let OWNED = new Set(); const AUTH = { user:null };
+function owns(key){ return !PRICE[key] || OWNED.has(PROD[key]) || OWNED.has(PACK_PROD); }
+function carLocked(key){ return !!PRICE[key] && !owns(key); }
+
 // one Play button: the switch above it picks online or free drive
 let MODE = store.get('mode', 'online');
 function playSync(){ document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === MODE));
-  const t = (MODE === 'online' ? $('onlineBtn') : $('soloBtn')); $('playBtn').textContent = /resume/i.test(t.textContent) ? 'Resume' : 'Play'; $('playBtn').disabled = t.disabled; }
+  const pb = $('playBtn');
+  if(carLocked(carKey)){ pb.textContent = 'Unlock — $' + PRICE[carKey]; pb.disabled = false; pb.dataset.locked = '1'; return; }
+  pb.dataset.locked = '';
+  const t = (MODE === 'online' ? $('onlineBtn') : $('soloBtn')); pb.textContent = /resume/i.test(t.textContent) ? 'Resume' : 'Play'; pb.disabled = t.disabled; }
 document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => { MODE = b.dataset.mode; store.set('mode', MODE); playSync(); }));
-$('playBtn').addEventListener('click', () => (MODE === 'online' ? $('onlineBtn') : $('soloBtn')).click());
+$('playBtn').addEventListener('click', () => { if($('playBtn').dataset.locked === '1'){ openUnlock(carKey); return; } (MODE === 'online' ? $('onlineBtn') : $('soloBtn')).click(); });
 new MutationObserver(playSync).observe($('onlineBtn'), {attributes:true, childList:true, characterData:true, subtree:true});
 new MutationObserver(playSync).observe($('soloBtn'), {attributes:true, childList:true, characterData:true, subtree:true});
+
+/* ---------- ownership: read the player's purchases, gate the paid cars, on-demand email login ---------- */
+async function loadOwned(){
+  const sb = (typeof wheelSB === 'function') ? wheelSB() : (NET && NET.sb); if(!sb) return;
+  try{
+    const s = await sb.auth.getSession(); AUTH.user = (s && s.data && s.data.session && s.data.session.user) || null;
+    OWNED = new Set();
+    if(AUTH.user){ const r = await sb.from('purchases').select('product'); if(r && r.data) r.data.forEach(x => OWNED.add(x.product)); }
+  }catch(e){}
+  document.querySelectorAll('#cars button[data-car]').forEach(b => b.classList.toggle('locked', carLocked(b.dataset.car)));
+  if(typeof playSync === 'function') playSync();
+}
+async function openUnlock(key){
+  const sb = (typeof wheelSB === 'function') ? wheelSB() : (NET && NET.sb);
+  const box = $('buyPair'), body = $('buyBody'); box.hidden = false;
+  if(!sb){ body.innerHTML = '<h3>Store unavailable</h3><p>Online service is not reachable right now.</p>'; return; }
+  const s = await sb.auth.getSession(); AUTH.user = (s && s.data && s.data.session && s.data.session.user) || null;
+  const name = (CAR_INFO[key] || {}).name || key, price = PRICE[key] || 7;
+  if(!AUTH.user){
+    body.innerHTML = '<h3>Unlock ' + name + '</h3><p>Sign in with your email to buy and keep your cars — no password.</p>'
+      + '<input id="buyEmail" type="email" inputmode="email" placeholder="you@email.com" autocomplete="email">'
+      + '<button id="buySend" class="bbtn">Email me a sign-in link</button><p id="buyMsg" class="bmsg"></p>';
+    $('buySend').onclick = async () => {
+      const email = ($('buyEmail').value || '').trim(); if(!/^\S+@\S+\.\S+$/.test(email)){ $('buyMsg').textContent = 'Enter a valid email.'; return; }
+      $('buyMsg').textContent = 'Sending…';
+      const r = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.href.split('#')[0] } });
+      $('buyMsg').textContent = (r && r.error) ? ('Error: ' + r.error.message) : 'Check your email for the link, then come back here.';
+    };
+  } else {
+    body.innerHTML = '<h3>Unlock ' + name + '</h3><p>Signed in as <b>' + AUTH.user.email + '</b></p>'
+      + '<button id="buyCar" class="bbtn">Buy ' + name + ' — $' + price + '</button>'
+      + '<button id="buyPack" class="bbtn alt">Night Drifts — all 3 cars — $' + PACK_PRICE + '</button>'
+      + '<p class="note">Card checkout is being set up — the buttons will open secure payment shortly.</p>'
+      + '<a id="buyLogout" class="blink">Log out</a>';
+    $('buyCar').onclick = () => { $('buyMsg2') || body.insertAdjacentHTML('beforeend', '<p id="buyMsg2" class="bmsg"></p>'); $('buyMsg2').textContent = 'Checkout opens here once Lemon Squeezy is connected.'; };
+    $('buyPack').onclick = $('buyCar').onclick;
+    $('buyLogout').onclick = async () => { await sb.auth.signOut(); await loadOwned(); box.hidden = true; };
+  }
+}
+(function buyUI(){
+  const css = document.createElement('style');
+  css.textContent = '#cars button.locked{position:relative}#cars button.locked::after{content:"🔒";position:absolute;top:6px;right:8px;font-size:13px;opacity:.9}'
+    + '#buyPair{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(5,6,12,.82);backdrop-filter:blur(6px)}'
+    + '#buyPair .cardb{width:min(92vw,400px);background:#0c0e18;border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:24px;color:#eef0f8;font-family:system-ui}'
+    + '#buyPair h3{margin:0 0 6px;font-size:22px}#buyPair p{color:#9aa1bd;font-size:14px;margin:8px 0;line-height:1.5}#buyPair .note{font-size:12px;opacity:.8}'
+    + '#buyPair input{width:100%;box-sizing:border-box;height:46px;padding:0 14px;margin:8px 0;border-radius:10px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.35);color:#fff;font:600 16px system-ui}'
+    + '#buyPair .bbtn{width:100%;height:50px;margin:8px 0 0;border:0;border-radius:12px;cursor:pointer;font:800 17px system-ui;color:#fff;background:linear-gradient(90deg,#ff2fd6,#ff7a1a);box-shadow:0 0 24px rgba(255,47,214,.4)}'
+    + '#buyPair .bbtn.alt{background:rgba(255,255,255,.1);box-shadow:none}#buyPair .bmsg{min-height:18px}#buyPair .blink{display:inline-block;margin-top:14px;color:#9aa1bd;cursor:pointer;font-size:13px}#buyPair .bx{margin-top:14px;border:1px solid rgba(255,255,255,.18);background:transparent;color:#fff;border-radius:10px;padding:10px 18px;font-weight:700;cursor:pointer}';
+  document.head.appendChild(css);
+  const o = document.createElement('div'); o.id = 'buyPair'; o.hidden = true;
+  o.innerHTML = '<div class="cardb"><div id="buyBody"></div><div style="text-align:center"><button class="bx" type="button">Close</button></div></div>';
+  document.body.appendChild(o);
+  o.querySelector('.bx').addEventListener('click', () => o.hidden = true);
+  o.addEventListener('click', e => { if(e.target === o) o.hidden = true; });
+})();
+loadOwned();
 playSync();
 document.querySelectorAll('#tod button').forEach(b => b.addEventListener('click', () => { NIGHT = b.dataset.tod === 'night'; store.set('night', NIGHT); applyNight(); for(const k in SHOW.cars) headlights(SHOW.cars[k], true); }));
 applyNight();
