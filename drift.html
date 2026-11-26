@@ -328,7 +328,11 @@ function loadCar(key, cb){
   C.loading = [cb];
   loader.load(C.file, g => { prepCar(C, g.scene); if(NIGHT) setTimeout(applyNight, 0); const l = C.loading; C.loading = null; l.forEach(f => f && f(C)); }, undefined, () => $('status').textContent = "Couldn't load the car.");
 }
-loadCar(carKey, () => { loaded++; loadBar(); maybeReady(); SETS[setOf(carKey)].forEach(k => loadCar(k)); });
+loadCar(carKey, () => { loaded++; loadBar(); maybeReady();
+  // the game is playable with just this car — trickle in the rest of the set during idle time
+  // so switching stays instant without holding up the first load on a slow laptop
+  const preloadRest = () => SETS[setOf(carKey)].forEach(k => { if(k !== carKey) loadCar(k); });
+  (window.requestIdleCallback ? requestIdleCallback(preloadRest, {timeout:4000}) : setTimeout(preloadRest, 2500)); });
 
 /* Height and wall map, built once from the circuit's own triangles (0.5 m cells):
    gentle faces become road/terrain height; steep faces (barriers, walls, trees) become obstacles. */
