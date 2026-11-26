@@ -148,6 +148,8 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <img class="logo" src="img/night-drifts-logo.jpg" alt="Night Drifts, Drift Online">
     <span class="lbl">Time</span>
     <div class="seg" id="tod"><button type="button" data-tod="day" class="on">Day</button><button type="button" data-tod="night">Night</button></div>
+    <span class="lbl">Graphics</span>
+    <div class="seg" id="gfx"><button type="button" data-gfx="normal">Normal</button><button type="button" data-gfx="lite">Lite</button></div>
     <span class="lbl">Garage</span>
     <div class="tabs" id="sets"><button type="button" data-set="classic" class="on">Classic<small>3 cars</small></button><button type="button" data-set="tokyo">Tokyo Drift<small>3 cars</small></button></div>
     <div class="cars" id="cars">
@@ -206,10 +208,13 @@ const BUILD = '2026-11-22.1';
 const store = { get(k, d){ try{ const v = localStorage.getItem('dydrift.' + k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } }, set(k, v){ try{ localStorage.setItem('dydrift.' + k, JSON.stringify(v)); }catch(e){} } };
 
 /* ---------- renderer & scene ---------- */
-const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+// Lite mode for weak laptops: no antialiasing, pixel ratio capped at 1, shadows off.
+// These are set once at startup, so the Graphics toggle reloads the page to apply them.
+const LITE = store.get('lite', false);
+const renderer = new THREE.WebGLRenderer({antialias: !LITE, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio, LITE ? 1 : 1.75));
 renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = !LITE; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 $('stage').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const FOGC = 0xb9c6d1; scene.fog = new THREE.Fog(FOGC, 120, 650);
@@ -846,6 +851,9 @@ new MutationObserver(playSync).observe($('soloBtn'), {attributes:true, childList
 playSync();
 document.querySelectorAll('#tod button').forEach(b => b.addEventListener('click', () => { NIGHT = b.dataset.tod === 'night'; store.set('night', NIGHT); applyNight(); for(const k in SHOW.cars) headlights(SHOW.cars[k], true); }));
 applyNight();
+// Graphics: Normal vs Lite (weak PCs). Changing it reloads so the renderer rebuilds with the new settings.
+document.querySelectorAll('#gfx button').forEach(b => { b.classList.toggle('on', (b.dataset.gfx === 'lite') === LITE);
+  b.addEventListener('click', () => { const wantLite = b.dataset.gfx === 'lite'; if(wantLite === LITE) return; store.set('lite', wantLite); location.reload(); }); });
 document.querySelectorAll('#cars button').forEach(b => { b.classList.toggle('on', b.dataset.car === carKey); b.addEventListener('click', () => {
   document.querySelectorAll('#cars button').forEach(q => q.classList.toggle('on', q === b));
   carKey = b.dataset.car; store.set('car', carKey); if(loaded >= NEED) setCar(carKey); pickUpdate(); }); });
