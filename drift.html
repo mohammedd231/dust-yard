@@ -190,6 +190,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
 <script src="touch-controls.js"></script>
 <script>
 (() => {
@@ -840,6 +841,38 @@ let OWNED = new Set(); const AUTH = { user:null };
 function owns(key){ return !PRICE[key] || OWNED.has(PROD[key]) || OWNED.has(PACK_PROD); }
 function carLocked(key){ return !!PRICE[key] && !owns(key); }
 
+// --- Paddle Billing (sandbox) ---
+const PADDLE = {
+  token: 'test_7bdfb48d145cebd3aaebfd46e75', env: 'sandbox', ready: false,
+  price: { fortune:'pri_01m8bskmqdrkde209d9w56stw5', r34:'pri_01m8bsgt2e30y3cb89tkt39zy0', eclipse:'pri_01m8bsma2fhfkqz2d8vwvsfs31', pack:'pri_01m8bsncnqpxx1tz2fbyje10dk' }
+};
+function paddleInit(){
+  if(PADDLE.ready || typeof Paddle === 'undefined') return PADDLE.ready;
+  try{
+    if(PADDLE.env === 'sandbox') Paddle.Environment.set('sandbox');
+    Paddle.Initialize({ token: PADDLE.token, eventCallback: ev => {
+      if(ev && (ev.name === 'checkout.completed')){ setTimeout(() => { loadOwned(); const b = $('buyPair'); if(b) b.hidden = true; }, 1200); }
+    }});
+    PADDLE.ready = true;
+  }catch(e){}
+  return PADDLE.ready;
+}
+// open Paddle checkout for a car key ('fortune'/'r34'/'eclipse') or the 'pack'
+function openCheckout(which){
+  if(!paddleInit() || !AUTH.user) return false;
+  const priceId = PADDLE.price[which]; if(!priceId) return false;
+  const product = (which === 'pack') ? PACK_PROD : PROD[which];
+  try{
+    Paddle.Checkout.open({
+      items: [{ priceId, quantity: 1 }],
+      customer: { email: AUTH.user.email },
+      customData: { user_id: AUTH.user.id, product },
+      settings: { displayMode: 'overlay', theme: 'dark', successUrl: location.href.split('#')[0] }
+    });
+    return true;
+  }catch(e){ return false; }
+}
+
 // one Play button: the switch above it picks online or free drive
 let MODE = store.get('mode', 'online');
 function playSync(){ document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === MODE));
@@ -880,13 +913,14 @@ async function openUnlock(key){
       $('buyMsg').textContent = (r && r.error) ? ('Error: ' + r.error.message) : 'Check your email for the link, then come back here.';
     };
   } else {
+    paddleInit();
     body.innerHTML = '<h3>Unlock ' + name + '</h3><p>Signed in as <b>' + AUTH.user.email + '</b></p>'
       + '<button id="buyCar" class="bbtn">Buy ' + name + ' — $' + price + '</button>'
       + '<button id="buyPack" class="bbtn alt">Night Drifts — all 3 cars — $' + PACK_PRICE + '</button>'
-      + '<p class="note">Card checkout is being set up — the buttons will open secure payment shortly.</p>'
+      + '<p class="note">Secure card payment by Paddle. Your cars stay on this account.</p>'
       + '<a id="buyLogout" class="blink">Log out</a>';
-    $('buyCar').onclick = () => { $('buyMsg2') || body.insertAdjacentHTML('beforeend', '<p id="buyMsg2" class="bmsg"></p>'); $('buyMsg2').textContent = 'Checkout opens here once Lemon Squeezy is connected.'; };
-    $('buyPack').onclick = $('buyCar').onclick;
+    $('buyCar').onclick = () => { if(!openCheckout(key)){ $('buyMsg2') || body.insertAdjacentHTML('beforeend', '<p id="buyMsg2" class="bmsg"></p>'); $('buyMsg2').textContent = 'Could not open checkout — please try again.'; } };
+    $('buyPack').onclick = () => { if(!openCheckout('pack')){ $('buyMsg2') || body.insertAdjacentHTML('beforeend', '<p id="buyMsg2" class="bmsg"></p>'); $('buyMsg2').textContent = 'Could not open checkout — please try again.'; } };
     $('buyLogout').onclick = async () => { await sb.auth.signOut(); await loadOwned(); box.hidden = true; };
   }
 }
