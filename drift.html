@@ -301,7 +301,7 @@ let loaded = 0; const NEED = 2;
 const setLoad = (pct, txt) => { $('loadBar').style.width = pct + '%'; $('splashBar').style.width = pct + '%'; if(txt){ $('status').textContent = txt; $('splashTxt').textContent = txt; } };
 const loadBar = () => setLoad(Math.round(loaded/NEED*100));
 const loader = new THREE.GLTFLoader();
-let TRACK = null, HM = null;
+let TRACK = null, HM = null, RR = null;
 const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, exhaustAt:[-0.42, 0.3, -2.12], drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
                integra:{ file:'models/drift/integra.glb', name:'Acura Integra', length:4.53, drive:'rwd', power:150000, mass:1180, redline:7600, gears:[3.23, 1.9, 1.27, 0.97, 0.78], final:4.4, model:null,
                  wheelMat:/^(rims|tire_rim|rotor|caliper|black_rims|rim_metal)$/, neon:0x1e9bff },
@@ -322,6 +322,7 @@ loader.load('models/drift/track.glb', g => {
     ms.forEach(m => { if(m.map) m.map.anisotropy = 4; if(m.transparent || m.alphaTest){ m.alphaTest = Math.max(m.alphaTest || 0, 0.45); m.transparent = false; } }); } });
   scene.add(g.scene); TRACK = g.scene; TRACK.updateMatrixWorld(true);
   HM = buildHeightmap(TRACK);
+  if(RR) RR.onTrack();
   loaded++; loadBar(); if(loaded < NEED) setLoad(Math.round(loaded/NEED*100), 'Loading the car…'); maybeReady();
 }, e => { if(e.total){ const p = Math.round(e.loaded/e.total*100); setLoad(Math.round(p*0.5), 'Loading the circuit… ' + p + '%'); } },
   () => setLoad(0, "Couldn't load the circuit. Check your connection and reload."));
@@ -389,7 +390,7 @@ function buildHeightmap(root){
       for(let k = 0; k < W*H; k++) if(low[k] < 1e3 && ground[k] - low[k] > 2.2) ground[k] = low[k];
     }
   }
-  return {x0, z0, W, H, cell, ground, wall};
+  return {x0, z0, W, H, cell, ground, wall, road};
 }
 function hAt(x, z){
   const M = HM, fx = (x - M.x0)/M.cell - 0.5, fz = (z - M.z0)/M.cell - 0.5, i = Math.floor(fx), j = Math.floor(fz);
@@ -1598,6 +1599,7 @@ function frame(){
     // remember a clean spot to come back to with R
     safeT -= dt; if(safeT <= 0 && S.started && S.kmh > 10 && S.slipR < 0.3){ safeT = 1; S.safe = {x:S.x, z:S.z}; }
     smokeTick(dt); exhTick(dt); engineSound(dt); netTick(dt); hud(dt);
+    if(RR) RR.tick(dt);
     if(S.started && S.intro > 0) introCamera(dt);
     else if(S.started) positionCamera(dt, false);
     else showroomCamera(t);
@@ -1619,6 +1621,143 @@ if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ look:(dx, dy) => lookBy(dx*1.3, d
   { label:'Reset', x:'l0', y:'t0', size:'sm', code:'KeyR' },
   { label:'Rev', x:'r1.08', y:'b1.3', size:'md', code:'Enter', buzz:true }
 ] });
+
+/* ---------- Ring Rush: drift through rings against a 60s clock ---------- */
+RR = (function(){
+  const TIME = 60, N = 10, RAD = 3.6;                 // run length (s), ring count, collect radius (m)
+  const T1 = 12, T2 = 28, T3 = 42, MINKMH = 18;       // slip-angle (deg) tiers; below T1 or too slow = straight = no score
+  const COL = { base:0x19d3ff, t1:0xcd7f32, t2:0xcdd4e4, t3:0xffd23f, miss:0xff3344 };
+  const group = new THREE.Group(); scene.add(group); group.visible = false;
+  let rings = [], state = 'idle', timeLeft = 0, count = 0, score = 0, placed = false;
+  let best = store.get('rrBest', 0), bestName = store.get('rrName', '');
+  const fx = [];                                      // transient collect bursts
+  let startBtn, hudEl, endEl, flashEl;
+
+  function ringMesh(col){
+    const o = new THREE.Mesh(new THREE.TorusGeometry(RAD, 0.3, 10, 40), new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.92 }));
+    o.add(new THREE.Mesh(new THREE.CircleGeometry(RAD - 0.15, 36), new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.08, side:THREE.DoubleSide, depthWrite:false })));
+    return o;
+  }
+  // scatter N rings around the road loop, ordered by bearing from the track centre, each gate facing along the lap
+  function onTrack(){
+    if(placed || !HM || !HM.road) return;
+    const M = HM, pts = [];
+    for(let j = 0; j < M.H; j++) for(let i = 0; i < M.W; i++) if(M.road[j*M.W + i]) pts.push([M.x0 + (i + 0.5)*M.cell, M.z0 + (j + 0.5)*M.cell]);
+    if(pts.length < N) return;
+    let cx = 0, cz = 0; for(const p of pts){ cx += p[0]; cz += p[1]; } cx /= pts.length; cz /= pts.length;
+    const chosen = [];
+    for(let k = 0; k < N; k++){
+      const want = k/N*Math.PI*2 - Math.PI; let bp = null, bs = -1;
+      for(const p of pts){ let da = Math.abs(Math.atan2(p[1] - cz, p[0] - cx) - want); if(da > Math.PI) da = 2*Math.PI - da;
+        const s = Math.hypot(p[0] - cx, p[1] - cz)*Math.max(0, 1 - da*1.3); if(s > bs){ bs = s; bp = p; } }
+      if(bp) chosen.push(bp);
+    }
+    for(let k = 0; k < chosen.length; k++){
+      const p = chosen[k], nx = chosen[(k + 1) % chosen.length], y = hAt(p[0], p[1]) + 1.35;
+      const o = ringMesh(COL.base); o.position.set(p[0], y, p[1]);
+      const tg = new THREE.Vector3(nx[0] - p[0], 0, nx[1] - p[1]); if(tg.lengthSq() < 1e-4) tg.set(1, 0, 0);
+      o.lookAt(o.position.clone().add(tg.normalize()));                                   // torus hole-axis faces along the lap
+      o.visible = false; group.add(o);
+      rings.push({ o, x:p[0], z:p[1], y, got:false });
+    }
+    placed = true; buildUI();
+  }
+  function resetRings(){ if(state !== 'running') return; for(const r of rings){ r.got = false; r.o.visible = true; r.o.scale.setScalar(1); r.o.material.opacity = 0.92; } }
+  function begin(){
+    if(!placed || state === 'running' || !S.started || NET.game) return;
+    state = 'running'; timeLeft = TIME; count = 0; score = 0; group.visible = true;
+    for(const r of rings){ r.got = false; r.o.visible = true; r.o.scale.setScalar(1); r.o.material.opacity = 0.92; }
+    endEl.hidden = true; hudEl.hidden = false; paintHud();
+  }
+  function end(){
+    state = 'done'; hudEl.hidden = true; group.visible = false;
+    const beat = score > best; if(beat){ best = score; bestName = (typeof myName === 'string' && myName) || 'You'; store.set('rrBest', best); store.set('rrName', bestName); }
+    endEl.querySelector('#rrEndScore').textContent = score.toLocaleString();
+    endEl.querySelector('#rrEndSub').textContent = count + ' ring' + (count === 1 ? '' : 's') + ' · ' + (beat ? 'NEW RECORD!' : 'Record ' + best.toLocaleString() + (bestName ? ' · ' + bestName : ''));
+    endEl.querySelector('#rrEndSub').style.color = beat ? '#2bff5a' : '#9aa1bd';
+    endEl.hidden = false;
+  }
+  function abort(){ state = 'idle'; hudEl.hidden = true; endEl.hidden = true; group.visible = false; }
+  function collect(r){
+    r.got = true; r.o.visible = false;
+    const a = S.angle || 0, fast = (S.kmh || 0) >= MINKMH;
+    let col = COL.miss, pts = 0, label = 'STRAIGHT — no score', tier = 0;
+    if(fast && a >= T3){ col = COL.t3; pts = 30; label = 'PERFECT  +30'; tier = 3; }
+    else if(fast && a >= T2){ col = COL.t2; pts = 20; label = 'GREAT  +20'; tier = 2; }
+    else if(fast && a >= T1){ col = COL.t1; pts = 10; label = '+10'; tier = 1; }
+    if(pts > 0){ score += pts; count++; }
+    burst(r, col, tier);
+    msg(label, '#' + col.toString(16).padStart(6, '0'));
+    if(tier === 3) flash();
+    if(rings.every(x => x.got)) setTimeout(resetRings, 350);
+    paintHud();
+  }
+  function burst(r, col, tier){
+    const o = new THREE.Mesh(new THREE.TorusGeometry(RAD, 0.3, 8, 32), new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.85 }));
+    o.position.copy(r.o.position); o.quaternion.copy(r.o.quaternion); scene.add(o);
+    fx.push({ o, t:0, dur: tier === 3 ? 0.9 : 0.55, grow: tier === 3 ? 2.6 : 1.6 });
+    try{ const base = new THREE.Vector3(r.x, r.y - 1, r.z); for(let i = 0; i <= tier; i++) puff(base.clone(), 0.8); }catch(e){}
+  }
+  function flash(){ if(!flashEl) return; flashEl.style.transition = 'none'; flashEl.style.opacity = '0.45'; requestAnimationFrame(() => { flashEl.style.transition = 'opacity .5s'; flashEl.style.opacity = '0'; }); }
+  function paintHud(){ if(!hudEl) return;
+    hudEl.querySelector('#rrTime').textContent = Math.ceil(timeLeft);
+    hudEl.querySelector('#rrScore').textContent = score.toLocaleString();
+    hudEl.querySelector('#rrCount').textContent = count;
+    hudEl.querySelector('#rrRec').textContent = 'RECORD ' + best.toLocaleString() + (bestName ? ' · ' + bestName : '');
+  }
+  function tick(dt){
+    // animate collect bursts (expand + fade), then dispose
+    for(let i = fx.length - 1; i >= 0; i--){ const f = fx[i], k = (f.t += dt)/f.dur;
+      if(k >= 1){ scene.remove(f.o); f.o.geometry.dispose(); f.o.material.dispose(); fx.splice(i, 1); continue; }
+      f.o.scale.setScalar(1 + k*f.grow); f.o.material.opacity = 0.85*(1 - k); }
+    if(group.visible) for(const r of rings){ if(!r.got) r.o.rotation.z += dt*0.6; }     // idle spin
+    // show/hide the Start button by game state
+    if(startBtn){ const can = placed && !NET.game && S.started && !S.paused && state === 'idle'; startBtn.style.display = can ? 'flex' : 'none'; }
+    if(state !== 'running') return;
+    if(!S.started || NET.game){ abort(); return; }
+    timeLeft -= dt; if(timeLeft <= 0){ timeLeft = 0; end(); return; }
+    for(const r of rings){ if(r.got) continue; const dx = S.x - r.x, dz = S.z - r.z;
+      if(dx*dx + dz*dz > RAD*RAD || Math.abs(S.y - r.y) > 2.6) continue; collect(r); }
+    paintHud();
+  }
+  function buildUI(){
+    if(startBtn) return;
+    const css = document.createElement('style');
+    css.textContent =
+      '#rrStart{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:8;display:none;align-items:center;gap:10px;cursor:pointer;'
+      + 'border:0;border-radius:999px;padding:13px 22px;font:800 15px/1 Rajdhani,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#06121a;'
+      + 'background:linear-gradient(90deg,#19d3ff,#2bff9a);box-shadow:0 6px 24px rgba(25,211,255,.45)}'
+      + '#rrStart:active{transform:translateX(-50%) scale(.97)}'
+      + '#rrHud{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:8;text-align:center;font-family:Rajdhani,system-ui,sans-serif;color:#eef0f8;pointer-events:none;text-shadow:0 2px 10px rgba(0,0,0,.6)}'
+      + '#rrHud .t{font:800 46px/1 Saira Condensed,Rajdhani,system-ui;letter-spacing:.02em}'
+      + '#rrHud .s{margin-top:2px;font:700 18px/1 Rajdhani;letter-spacing:.06em}#rrHud .s b{color:#19d3ff;font-size:22px}'
+      + '#rrHud .r{margin-top:6px;font:700 12px/1 Rajdhani;letter-spacing:.14em;color:#ffd23f;opacity:.95}'
+      + '#rrEnd{position:fixed;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;background:rgba(5,6,12,.78);backdrop-filter:blur(5px);font-family:Rajdhani,system-ui,sans-serif}'
+      + '#rrEnd .c{width:min(90vw,360px);text-align:center;background:#0c0e18;border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:26px 24px;color:#eef0f8}'
+      + '#rrEnd h3{margin:0;font:700 15px/1 Rajdhani;letter-spacing:.18em;text-transform:uppercase;color:#9aa1bd}'
+      + '#rrEndScore{font:800 66px/1 Saira Condensed,Rajdhani;color:#19d3ff;margin:8px 0}#rrEndSub{font:700 15px/1.3 Rajdhani;margin-bottom:18px}'
+      + '#rrEnd button{width:100%;height:50px;margin-top:9px;border:0;border-radius:12px;cursor:pointer;font:800 16px/1 Rajdhani;letter-spacing:.06em;text-transform:uppercase;color:#06121a;background:linear-gradient(90deg,#19d3ff,#2bff9a)}'
+      + '#rrEnd button.alt{background:rgba(255,255,255,.1);color:#eef0f8}'
+      + '#rrFlash{position:fixed;inset:0;z-index:7;pointer-events:none;opacity:0;background:radial-gradient(circle,rgba(255,210,63,.55),rgba(255,210,63,0) 65%)}';
+    document.head.appendChild(css);
+
+    startBtn = document.createElement('button'); startBtn.id = 'rrStart'; startBtn.type = 'button';
+    startBtn.innerHTML = '◎ Ring Rush <span style="opacity:.7">· 60s</span>';
+    startBtn.addEventListener('click', begin);
+
+    hudEl = document.createElement('div'); hudEl.id = 'rrHud'; hudEl.hidden = true;
+    hudEl.innerHTML = '<div class="t"><span id="rrTime">60</span></div><div class="s"><b id="rrScore">0</b> pts · <span id="rrCount">0</span> rings</div><div class="r" id="rrRec"></div>';
+
+    endEl = document.createElement('div'); endEl.id = 'rrEnd'; endEl.hidden = true;
+    endEl.innerHTML = '<div class="c"><h3>Time!</h3><div id="rrEndScore">0</div><div id="rrEndSub"></div><button id="rrAgain" type="button">Go again</button><button id="rrClose" class="alt" type="button">Done</button></div>';
+
+    flashEl = document.createElement('div'); flashEl.id = 'rrFlash';
+    document.body.append(startBtn, hudEl, endEl, flashEl);
+    endEl.querySelector('#rrAgain').addEventListener('click', begin);
+    endEl.querySelector('#rrClose').addEventListener('click', abort);
+  }
+  return { onTrack, tick, begin };
+})();
 })();
 </script>
 </body>
