@@ -1070,7 +1070,7 @@ function initAudio(){
 const SAMPLES = {
   jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8, 0.55]], pops:4, flutter:true, coldstart:true, vol:1.25 },
   // RX-7: the brap idle sped up with the revs (the pup-pup gets faster until it blurs), the smooth high-rpm scream, then anti-lag at the limiter
-  rx7:{ dir:'sounds/rx7/', prefix:'rx7_', brightHz:5800, loops:[['idle', 950, 0, 4200, 1000, 1, 0, 2.6], ['high', 7200, 3800, 99999, 1000], ['antilag', 8300, 8150, 9999, 300, 1.15, 0]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // idle no longer over-pitched into a screech; softer anti-lag and a tamer top end
+  rx7:{ dir:'sounds/rx7/', prefix:'rx7_', brightHz:5800, loops:[['idle', 950, 0, 4600, 1200, 1, 0, 5.0], ['high', 7200, 3600, 99999, 1200], ['antilag', 8300, 8150, 9999, 300, 1.15, 0]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // idle pitch rises continuously (pup-pup blurs up) and crossfades wide into the high scream — one engine, no screech; brightness roll-off keeps it smooth
 };
 SAMPLES.fortune = SAMPLES.rx7;   // Han's RX-7 sounds exactly like ours
 // Eclipse GSX: its own cold start, idle and a pull through the gears
