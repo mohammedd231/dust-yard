@@ -304,7 +304,7 @@ const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null, RR = null;
 const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, exhaustAt:[-0.42, 0.3, -2.12], drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
                integra:{ file:'models/drift/s15.glb', name:'Nissan Silvia S15', length:4.45, drive:'rwd', power:190000, mass:1230, redline:7800, gears:[3.63, 2.2, 1.54, 1.21, 1.0, 0.77], final:4.08, model:null, flip:1,
-                 wheelMat:/^(rims|rim_mat|rim_metal|wheelcap|brake_disc|caliper|logo_caliper|tire)$/, tyreMat:/^tire$/, neon:0x2ad1ff },
+                 wheelMat:/^(rims|rim_mat|rim_metal|wheelcap|brake_disc|caliper|logo_caliper|tire)$/, tyreMat:/^tire$/, neon:0x2ad1ff, smokedTails:1 },
                jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff },
                // Tokyo Drift line-up
                fortune:{ file:'models/drift/fortune.glb', name:'VeilSide RX-7', set:'tokyo', length:4.48, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a,
@@ -607,7 +607,9 @@ function prepCar(C, m){
       }
       const mt = rear.material.clone(); if(!mt.emissive) continue; if(mt.transmission) mt.transmission = 0;
       if(mt.transparent || mt.opacity < 1){ mt.transparent = false; mt.opacity = 1; mt.depthWrite = true; }   // a see-through lens would hide its own glow
-      mt.emissive = new THREE.Color(0, 0, 0); mt.emissiveMap = mt.map || null; mt.emissiveIntensity = 0; mt.toneMapped = false; mt.needsUpdate = true; rear.material = mt; rear.userData.tailLamp = true; C.tail.push(mt); lamps.push(rear);
+      mt.emissive = new THREE.Color(0, 0, 0); mt.emissiveMap = mt.map || null;
+      if(C.smokedTails){ mt.map = null; mt.emissiveMap = null; mt.color.setHex(0x160a0a); mt.roughness = 0.3; mt.metalness = 0.15; }   // smoked dark lens; the glow shows uniformly over it
+      mt.emissiveIntensity = 0; mt.toneMapped = false; mt.needsUpdate = true; rear.material = mt; rear.userData.tailLamp = true; C.tail.push(mt); lamps.push(rear);
     }
     // where the amber shows at start-up, for cars whose real lamps have a separate amber part:
     // 'band'  - a thin amber line across the middle of a full-width red bar (the Eclipse)
@@ -1081,8 +1083,10 @@ SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', brightHz:5600, loo
 SAMPLES.r34 = { dir:'sounds/r34/', prefix:'r34_', loops:[['idle', 1200, 0, 2500, 600], ['cruise', 2400, 1800, 4800, 700], ['pull', 3500, 4000, 99999, 800],
     ['sounds/supra/supra_top.wav', 7100, 7700, 9000, 300, 1.4, 0.3]],   // the Supra's turbo/anti-lag: quiet on boost, full at the limiter
   pops:4, flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.45, flutterPitch:1.08, coldstart:true, fire:1.75, vol:1.3 };
-// Silvia S15 (key 'integra'): the owner's SR20 recording — an idle loop, a high-rev loop and a real cold start (starter crank, catches at 1.7s)
-SAMPLES.integra = { dir:'sounds/s15/', prefix:'s15_', brightHz:6500, loops:[['idle', 2400, 0, 4200, 1400, 1, 0, 3.2], ['high', 3700, 3200, 99999, 1400]], pops:0, coldstart:true, fire:1.7, vol:1.3 };
+// Silvia S15 (key 'integra'): owner's SR20 recording — idle + high-rev pull, supra_top anti-lag riding on boost, supra pops/flutter on lift-off, real cold start
+SAMPLES.integra = { dir:'sounds/s15/', prefix:'s15_', brightHz:6800,
+  loops:[['idle', 1500, 0, 3200, 1400], ['high', 4000, 2600, 99999, 1400], ['sounds/supra/supra_top.wav', 6900, 5200, 9000, 1200, 1.25, 0.35]],
+  pops:4, popFrom:'sounds/supra/supra_pop', flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.5, flutterPitch:1.0, coldstart:true, fire:0.55, vol:1.3 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
@@ -1233,7 +1237,7 @@ function skidSeg(side, p, dir){
 const flameMesh = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,230,1)'); gr.addColorStop(0.3, 'rgba(255,170,60,.9)'); gr.addColorStop(0.7, 'rgba(255,80,20,.4)'); gr.addColorStop(1, 'rgba(255,40,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), blending:THREE.AdditiveBlending, depthWrite:false, transparent:true})); sp.visible = false; scene.add(sp); return sp; })();
 let flameT = 0; function flame(t){ flameT = Math.max(flameT, t); }
-const LAMP_RED = new THREE.Color(1, 0.015, 0.01), LAMP_AMBER = new THREE.Color(1, 0.55, 0.05);
+const LAMP_RED = new THREE.Color(1, 0.015, 0.01), LAMP_AMBER = new THREE.Color(1, 0.55, 0.05), COLD_GLOW = new THREE.Color(1, 0.42, 0.06);
 
 /* ---------- car on screen ---------- */
 function updateCar(dt){
@@ -1271,8 +1275,17 @@ function updateCar(dt){
   // tail lamps: amber flashes while it starts, dim red running lights with the engine on, bright red on the brakes
   if(C.tail && C.tail.length){
     if(S.amberT > 0) S.amberT -= dt;
-    const st = S.amberT > 0 ? 'amber' : S.engineOn !== false && S.started ? (S.brk ? 'brake' : 'run') : 'off';
-    setLamps({tail:C.tail, amber:C.tailAmber || [], band:C.tailBand || [], glow:C.tailGlow}, st, Math.floor(S.amberT/0.32) % 2 === 0);
+    if(C.smokedTails && S.amberT > 0 && C.tail){
+      // smoked tails warm up with a steady yellow-red glow on cold start (no turn-signal blink)
+      const fade = clamp(S.amberT/1.9, 0, 1);
+      for(const mt of C.tail){ mt.emissive.copy(COLD_GLOW); mt.emissiveIntensity = 2.4*fade; }
+      for(const gm of (C.tailGlow || [])){ gm.color.copy(COLD_GLOW); gm.opacity = 0.55*fade; }
+    } else {
+      // smoked tails stay dark when running (lit red only under braking); other cars keep dim running lights
+      const running = S.engineOn !== false && S.started;
+      const st = S.amberT > 0 ? 'amber' : running ? (S.brk ? 'brake' : (C.smokedTails ? 'off' : 'run')) : 'off';
+      setLamps({tail:C.tail, amber:C.tailAmber || [], band:C.tailBand || [], glow:C.tailGlow}, st, Math.floor(S.amberT/0.32) % 2 === 0);
+    }
   }
   { const on = NIGHT && S.started && S.engineOn !== false; headlights(car, on); HEAD_BEAM.intensity = on ? 2.4 : 0;
     if(on){ car.updateMatrixWorld(true); HEAD_BEAM.position.copy(car.localToWorld(new V3(0, C.headY || 0.6, (C.front || 2.1) + 0.2))); HEAD_BEAM.target.position.copy(car.localToWorld(new V3(0, -0.6, (C.front || 2.1) + 18))); HEAD_BEAM.target.updateMatrixWorld(); } }
