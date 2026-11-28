@@ -304,7 +304,7 @@ const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null, RR = null;
 const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, exhaustAt:[-0.42, 0.3, -2.12], drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
                integra:{ file:'models/drift/s15.glb', name:'Nissan Silvia S15', length:4.45, drive:'rwd', power:190000, mass:1230, redline:7800, gears:[3.63, 2.2, 1.54, 1.21, 1.0, 0.77], final:4.08, model:null, flip:1,
-                 wheelMat:/^(rims|rim_mat|rim_metal|wheelcap|brake_disc|caliper|logo_caliper)$/, tyreMat:/^tire$/, neon:0x2ad1ff },
+                 wheelMat:/^(rims|rim_mat|rim_metal|wheelcap|brake_disc|caliper|logo_caliper|tire)$/, tyreMat:/^tire$/, neon:0x2ad1ff },
                jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff },
                // Tokyo Drift line-up
                fortune:{ file:'models/drift/fortune.glb', name:'VeilSide RX-7', set:'tokyo', length:4.48, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a,
