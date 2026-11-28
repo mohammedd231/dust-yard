@@ -1070,11 +1070,11 @@ function initAudio(){
 const SAMPLES = {
   jdm:{ dir:'sounds/supra/', loops:[['idle', 1075, 850, 1700], ['mid', 1880, 1400, 4200], ['high', 2780, 3200, 99999, 300, 1], ['top', 7100, 7700, 9000, 300, 1.8, 0.55]], pops:4, flutter:true, coldstart:true, vol:1.25 },
   // RX-7: the brap idle sped up with the revs (the pup-pup gets faster until it blurs), the smooth high-rpm scream, then anti-lag at the limiter
-  rx7:{ dir:'sounds/rx7/', prefix:'rx7_', loops:[['idle', 950, 0, 4800, 1000, 1, 0, 5.2], ['high', 7200, 3800, 99999, 1000], ['antilag', 8300, 8150, 9999, 300, 1.6, 0]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // at the limiter the anti-lag rides on top of the same engine, not instead of it
+  rx7:{ dir:'sounds/rx7/', prefix:'rx7_', brightHz:5800, loops:[['idle', 950, 0, 4200, 1000, 1, 0, 2.6], ['high', 7200, 3800, 99999, 1000], ['antilag', 8300, 8150, 9999, 300, 1.15, 0]], pops:4, coldUrl:'sounds/supra/supra_coldstart.wav', vol:1.3 }   // idle no longer over-pitched into a screech; softer anti-lag and a tamer top end
 };
 SAMPLES.fortune = SAMPLES.rx7;   // Han's RX-7 sounds exactly like ours
 // Eclipse GSX: its own cold start, idle and a pull through the gears
-SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', loops:[['idle', 900, 0, 2600], ['pull', 2500, 1700, 99999, 800], ['sounds/supra/supra_top.wav', 6900, 7200, 9000, 300, 1.3, 0.3]],
+SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', brightHz:5600, loops:[['idle', 900, 0, 2600], ['pull', 2500, 1700, 6200, 1100, 1, 0, 2.4], ['sounds/supra/supra_top.wav', 6900, 5600, 9000, 900, 1.3, 0.3]],   // pull no longer stretched to 3x at redline; the top-end clip carries the high revs
   pops:4, popFrom:'sounds/supra/supra_pop', flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.45, flutterPitch:1.15, coldstart:true, fire:2.05, vol:1.3 };
 // R34 GT-R: cold start and idle, a steady cruise, a pull for the top end, and real bangs
 SAMPLES.r34 = { dir:'sounds/r34/', prefix:'r34_', loops:[['idle', 1200, 0, 2500, 600], ['cruise', 2400, 1800, 4800, 700], ['pull', 3500, 4000, 99999, 800],
@@ -1162,7 +1162,7 @@ function engineSound(dt){
       if(L.boost && S.thr && S.shiftT <= 0) w = Math.max(w, clamp((S.kmh - 30)/10, 0, 1)*L.boost);   // turbo on boost from ~35 km/h
       L.g.gain.setTargetAtTime(w*L.vol, t, 0.03);
     });
-    P.lp.frequency.setTargetAtTime(load > 0.5 ? 9000 : 1800 + rpm*0.25, t, 0.05);
+    P.lp.frequency.setTargetAtTime(load > 0.5 ? (P.brightHz || 9000) : 1800 + rpm*0.25, t, 0.05);
     P.out.gain.setTargetAtTime((S.paused ? 0.25 : 0.55 + load*0.45)*lim*P.vol*eg*Math.sqrt(1 - mixS*mixS), t, 0.03);
   }
   A.eng.gain.setTargetAtTime((rec ? mixS : 1)*(S.paused ? 0.12 : 0.22 + load*0.28)*lim*V.vol*eg, t, 0.03);
