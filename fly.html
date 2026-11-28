@@ -204,7 +204,7 @@ function buildBase(){
   const N=Math.floor(RW_LEN/80);
   const liL=new THREE.InstancedMesh(lightGeo, lightMat, N*2); const m4=new THREE.Matrix4();
   let k=0; for(let i=0;i<N;i++){ const zz=-RW_LEN/2+i*80; for(const sx of [-RW_W/2-2, RW_W/2+2]){ m4.makeTranslation(sx,1.4,zz); liL.setMatrixAt(k++,m4); } }
-  grp.add(liL);
+  liL.instanceMatrix.needsUpdate=true; grp.add(liL);
   window.__basePos = new V3(RWX, RWELEV, RWZ);
 }
 
@@ -234,8 +234,8 @@ function buildHomes(){
     const q2=q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new V3(0,1,0),Math.PI/4)); m4.compose(p,q2,s); roofs[ri].push(m4.clone());
     placed++;
   }
-  bodies.forEach((arr,i)=>{ if(!arr.length)return; const im=new THREE.InstancedMesh(bodyGeo,bodyMats[i],arr.length); arr.forEach((m,j)=>im.setMatrixAt(j,m)); scene.add(im); });
-  roofs.forEach((arr,i)=>{ if(!arr.length)return; const im=new THREE.InstancedMesh(roofGeo,roofMats[i],arr.length); arr.forEach((m,j)=>im.setMatrixAt(j,m)); scene.add(im); });
+  bodies.forEach((arr,i)=>{ if(!arr.length)return; const im=new THREE.InstancedMesh(bodyGeo,bodyMats[i],arr.length); arr.forEach((m,j)=>im.setMatrixAt(j,m)); im.instanceMatrix.needsUpdate=true; scene.add(im); });
+  roofs.forEach((arr,i)=>{ if(!arr.length)return; const im=new THREE.InstancedMesh(roofGeo,roofMats[i],arr.length); arr.forEach((m,j)=>im.setMatrixAt(j,m)); im.instanceMatrix.needsUpdate=true; scene.add(im); });
 }
 
 // ---------- plane ----------
@@ -373,15 +373,24 @@ function frame(t){
 addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
 
 // ---------- boot ----------
-function boot(){
-  buildTerrain(); buildSea(); buildBase(); buildHomes();
-  loadPlane(()=>{
-    resetToRunway();
-    if(P.obj){ P.obj.position.copy(P.pos); P.obj.quaternion.copy(P.quat); }
-    camera.position.copy(P.pos).add(new V3(0,8,30)); camera.lookAt(P.pos);
-    $('load').hidden=true; $('menu').hidden=false;
-    requestAnimationFrame(frame);
-  });
+let readyDone=false;
+function startReady(){
+  if(readyDone) return; readyDone=true;
+  resetToRunway();
+  if(P.obj){ P.obj.position.copy(P.pos); P.obj.quaternion.copy(P.quat); }
+  camera.position.copy(P.pos).add(new V3(0,8,30)); camera.lookAt(P.pos);
+  $('load').hidden=true; $('menu').hidden=false;
+  requestAnimationFrame(frame);
+}
+const tick=()=>new Promise(r=>setTimeout(r,25));
+async function boot(){
+  try{
+    $('load').textContent='Building terrain…'; await tick(); buildTerrain();
+    $('load').textContent='Water & airbase…'; await tick(); buildSea(); buildBase();
+    $('load').textContent='Building town…'; await tick(); buildHomes();
+    startReady();                      // show the world + menu now; the plane streams in next
+    loadPlane(()=>{ if(P.obj){ P.obj.position.copy(P.pos); P.obj.quaternion.copy(P.quat); } });
+  }catch(err){ $('load').textContent='Build error: '+((err&&err.message)||err); console.error(err); }
 }
 $('go').addEventListener('click', ()=>{ $('menu').hidden=true; $('hud').hidden=false; running=true; P.thr=0.15; last=performance.now(); });
 // start building after first paint
