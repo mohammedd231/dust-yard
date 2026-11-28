@@ -1081,8 +1081,8 @@ SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', brightHz:5600, loo
 SAMPLES.r34 = { dir:'sounds/r34/', prefix:'r34_', loops:[['idle', 1200, 0, 2500, 600], ['cruise', 2400, 1800, 4800, 700], ['pull', 3500, 4000, 99999, 800],
     ['sounds/supra/supra_top.wav', 7100, 7700, 9000, 300, 1.4, 0.3]],   // the Supra's turbo/anti-lag: quiet on boost, full at the limiter
   pops:4, flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.45, flutterPitch:1.08, coldstart:true, fire:1.75, vol:1.3 };
-// Silvia S15 (key 'integra'): PLACEHOLDER engine sound (the earlier Integra rev) until the S15 sounds arrive — swap sounds/integra/ clips then
-SAMPLES.integra = { dir:'sounds/integra/', prefix:'integra_', brightHz:6800, loops:[['low', 2400, 0, 4200, 1500, 1, 0, 3.2], ['high', 3700, 3200, 99999, 1500]], pops:0, vol:1.25 };
+// Silvia S15 (key 'integra'): the owner's SR20 recording — an idle loop, a high-rev loop and a real cold start (starter crank, catches at 1.7s)
+SAMPLES.integra = { dir:'sounds/s15/', prefix:'s15_', brightHz:6500, loops:[['idle', 2400, 0, 4200, 1400, 1, 0, 3.2], ['high', 3700, 3200, 99999, 1400]], pops:0, coldstart:true, fire:1.7, vol:1.3 };
 function loadSamples(){
   for(const key in SAMPLES){
     const P = SAMPLES[key]; if(P.ready || P.loading) continue; P.loading = true;
