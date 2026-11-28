@@ -154,7 +154,7 @@ html.touch .dash{bottom:auto;top:calc(8px + env(safe-area-inset-top,0px));right:
     <div class="tabs" id="sets"><button type="button" data-set="classic" class="on">Classic<small>3 cars</small></button><button type="button" data-set="tokyo">Tokyo Drift<small>3 cars</small></button></div>
     <div class="cars" id="cars">
       <button type="button" data-car="rx7" class="on"><b>Mazda RX-7</b><small>Dom's red VeilSide C-II. Tuned rotary, rear-drive, revs to 8,500.</small></button>
-      <button type="button" data-car="integra"><b>Acura Integra</b><small>'94 LS sedan, rear-drive swap with a VTEC four. Light and lively.</small></button>
+      <button type="button" data-car="integra"><b>Nissan Silvia S15</b><small>SR20DET turbo, rear-drive. A proper drift missile.</small></button>
       <button type="button" data-car="jdm"><b>JDM drift car</b><small>Rear-drive and powerful. Slides on the throttle.</small></button>
       <button type="button" data-car="fortune" hidden><b>VeilSide RX-7</b><small>Han's widebody Fortune. Same rotary, same feel as the RX-7.</small></button>
       <button type="button" data-car="r34" hidden><b>Skyline GT-R R34</b><small>Brian's silver-blue R34, set up rear-drive to slide.</small></button>
@@ -303,8 +303,8 @@ const loadBar = () => setLoad(Math.round(loaded/NEED*100));
 const loader = new THREE.GLTFLoader();
 let TRACK = null, HM = null, RR = null;
 const CARS = { rx7:{ file:'models/drift/rx7-c2.glb', name:'Mazda RX-7', length:4.4, wheelMat:/Wheel1A|Calliper/, tyreMat:/Wheel1A/, lampMat:/red_glass|LightA/, lampGlass:/^light_glass$/, exhaustAt:[-0.42, 0.3, -2.12], drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a },
-               integra:{ file:'models/drift/integra.glb', name:'Acura Integra', length:4.53, drive:'rwd', power:150000, mass:1180, redline:7600, gears:[3.23, 1.9, 1.27, 0.97, 0.78], final:4.4, model:null,
-                 wheelMat:/^(rims|tire_rim|rotor|caliper|black_rims|rim_metal)$/, neon:0x1e9bff },
+               integra:{ file:'models/drift/s15.glb', name:'Nissan Silvia S15', length:4.45, drive:'rwd', power:190000, mass:1230, redline:7800, gears:[3.63, 2.2, 1.54, 1.21, 1.0, 0.77], final:4.08, model:null,
+                 wheelMat:/^(rims|rim_mat|rim_metal|wheelcap|brake_disc|caliper|logo_caliper)$/, tyreMat:/^tire$/, neon:0x2ad1ff },
                jdm:{ file:'models/drift/jdm.glb', name:'JDM drift car', length:4.5, drive:'rwd', power:300000, mass:1250, redline:8000, gears:[3.6, 2.35, 1.62, 1.22, 1.0, 0.82], final:3.9, model:null, neon:0xa236ff },
                // Tokyo Drift line-up
                fortune:{ file:'models/drift/fortune.glb', name:'VeilSide RX-7', set:'tokyo', length:4.48, drive:'rwd', power:215000, mass:1280, redline:8500, gears:[3.48, 2.02, 1.39, 1.0, 0.72], final:4.1, model:null, neon:0xff1a2a,
@@ -828,7 +828,7 @@ function showSet(set, pick){
 document.querySelectorAll('#sets button').forEach(b => b.addEventListener('click', () => { showSet(b.dataset.set, true); pickUpdate(); }));
 /* home screen: the picked car's name and stats over the scene, arrows to flip through the line-up */
 const CAR_INFO = {
-  rx7:{tag:"Dom's VeilSide C-II", name:'Mazda RX-7', col:'#ff3b4a'}, integra:{tag:"Mia's '94 LS", name:'Acura Integra', col:'#2fa8ff'}, jdm:{tag:'Twin-turbo drift build', name:'Supra JDM', col:'#b14bff'},
+  rx7:{tag:"Dom's VeilSide C-II", name:'Mazda RX-7', col:'#ff3b4a'}, integra:{tag:'SR20DET drift build', name:'Nissan Silvia S15', col:'#2ad1ff'}, jdm:{tag:'Twin-turbo drift build', name:'Supra JDM', col:'#b14bff'},
   fortune:{tag:"Han's Fortune widebody", name:'VeilSide RX-7', col:'#ff7a1a'}, r34:{tag:"Brian's R34", name:'Skyline GT-R', col:'#2fa8ff'}, eclipse:{tag:"Brian's '95 GSX", name:'Eclipse', col:'#2bff5a'} };
 function pickUpdate(){
   const I = CAR_INFO[carKey] || {tag:'', name:CARS[carKey].name, col:'#ff2fd6'}, Cc = CARS[carKey], list = SETS[setOf(carKey)];
@@ -1080,7 +1080,7 @@ SAMPLES.eclipse = { dir:'sounds/eclipse/', prefix:'eclipse_', brightHz:5600, loo
 SAMPLES.r34 = { dir:'sounds/r34/', prefix:'r34_', loops:[['idle', 1200, 0, 2500, 600], ['cruise', 2400, 1800, 4800, 700], ['pull', 3500, 4000, 99999, 800],
     ['sounds/supra/supra_top.wav', 7100, 7700, 9000, 300, 1.4, 0.3]],   // the Supra's turbo/anti-lag: quiet on boost, full at the limiter
   pops:4, flutter:'sounds/supra/supra_flutter.wav', flutterVol:0.45, flutterPitch:1.08, coldstart:true, fire:1.75, vol:1.3 };
-// Acura Integra (B18 VTEC): a real rev from the owner's recording — a low-rev and a high-rev loop cut from the same pull, so they blend as one engine
+// Silvia S15 (key 'integra'): PLACEHOLDER engine sound (the earlier Integra rev) until the S15 sounds arrive — swap sounds/integra/ clips then
 SAMPLES.integra = { dir:'sounds/integra/', prefix:'integra_', brightHz:6800, loops:[['low', 2400, 0, 4200, 1500, 1, 0, 3.2], ['high', 3700, 3200, 99999, 1500]], pops:0, vol:1.25 };
 function loadSamples(){
   for(const key in SAMPLES){
