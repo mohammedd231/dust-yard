@@ -1626,7 +1626,7 @@ if(window.TOUCH && TOUCH.isTouch) TOUCH.init({ look:(dx, dy) => lookBy(dx*1.3, d
 
 /* ---------- Ring Rush: drift through rings against a 60s clock ---------- */
 RR = (function(){
-  const TIME = 60, N = 14, RAD = 3.6;                 // run length (s), ring count, collect radius (m)
+  const TIME = 60, N = 20, RAD = 3.6, SPACING = 52;   // run length (s), ring count, collect radius (m), ring spacing along the line (m)
   const T1 = 12, T2 = 28, T3 = 42, MINKMH = 18;       // slip-angle (deg) tiers; below T1 or too slow = straight = no score
   const COL = { base:0x19d3ff, t1:0xcd7f32, t2:0xcdd4e4, t3:0xffd23f, miss:0xff3344 };
   const group = new THREE.Group(); scene.add(group); group.visible = false;
@@ -1640,7 +1640,7 @@ RR = (function(){
     o.add(new THREE.Mesh(new THREE.CircleGeometry(RAD - 0.15, 36), new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.08, side:THREE.DoubleSide, depthWrite:false })));
     return o;
   }
-  // place N rings down the CENTRE of the racing ribbon, spread around the whole lap
+  // trace the racing line from the start, then pack rings along it (close together, as far as a 60s run reaches)
   function onTrack(){
     if(placed || !HM) return;
     const M = HM, W = M.W, H = M.H, cell = M.cell, INF = 1e9;
@@ -1654,25 +1654,34 @@ RR = (function(){
     for(let j = H - 2; j >= 0; j--) for(let i = W - 2; i >= 1; i--){ const k = j*W + i; if(!mask[k]) continue;
       dist[k] = Math.min(dist[k], dist[k+1] + 1, dist[k+W] + 1, dist[k+W+1] + 1.414, dist[k+W-1] + 1.414); }
     for(let k = 0; k < W*H; k++) if(dist[k] >= INF) dist[k] = 0;
-    // ribbon-width cells only: on the road, but not the wide paddocks/aprons (those aren't corners)
-    const LO = 1.4, HI = 9, band = [];
-    for(let j = 0; j < H; j++) for(let i = 0; i < W; i++){ const k = j*W + i, d = dist[k]; if(!mask[k] || d < LO || d > HI) continue;
-      band.push({ x:M.x0 + (i + 0.5)*cell, z:M.z0 + (j + 0.5)*cell, k }); }
-    if(band.length < N) return;
-    // farthest-point sampling, seeded at the spawn, so the rings spread evenly around the lap
-    const d2 = new Float32Array(band.length); let si = 0, sb = Infinity;
-    for(let a = 0; a < band.length; a++){ const dd = (band[a].x - GRID.x)**2 + (band[a].z - GRID.z)**2; if(dd < sb){ sb = dd; si = a; } }
-    const chosen = [band[si]];
-    for(let a = 0; a < band.length; a++) d2[a] = (band[a].x - band[si].x)**2 + (band[a].z - band[si].z)**2;
-    while(chosen.length < N){ let mi = 0, mv = -1; for(let a = 0; a < band.length; a++) if(d2[a] > mv){ mv = d2[a]; mi = a; }
-      chosen.push(band[mi]); for(let a = 0; a < band.length; a++){ const dd = (band[a].x - band[mi].x)**2 + (band[a].z - band[mi].z)**2; if(dd < d2[a]) d2[a] = dd; } }
-    // build the gates, each facing along the road (perpendicular to the distance-field gradient)
+    // sample the distance field at a world point → [depth, gradX, gradZ]
+    const samp = (x, z) => { const i = (x - M.x0)/cell | 0, j = (z - M.z0)/cell | 0;
+      if(i < 1 || j < 1 || i >= W - 1 || j >= H - 1) return [0, 0, 0];
+      const k = j*W + i; return [dist[k], dist[k+1] - dist[k-1], dist[k+W] - dist[k-W]]; };
+    // walk the centre of the road forward from the spawn, re-centring each step, no sharp reversals
+    let sx = GRID.x, sz = GRID.z, dx = Math.sin(GRID.h), dz = Math.cos(GRID.h), gg = 0;
+    while(samp(sx, sz)[0] < 2 && gg < 120){ sx += dx; sz += dz; gg++; }
+    const path = [{ x:sx, z:sz, dx, dz }], step = 2.5; let total = 0;
+    for(let it = 0; it < 5000; it++){
+      let cx = sx + dx*step, cz = sz + dz*step;
+      for(let r = 0; r < 4; r++){ const s = samp(cx, cz), gl = Math.hypot(s[1], s[2]); if(gl > 1e-3 && s[0] < 6){ cx += s[1]/gl*0.4; cz += s[2]/gl*0.4; } }
+      const s = samp(cx, cz); if(s[0] < 1) break;                                           // ran off the ribbon
+      let tx = -s[2], tz = s[1]; if(tx*dx + tz*dz < 0){ tx = -tx; tz = -tz; }
+      let tl = Math.hypot(tx, tz); if(tl < 1e-3){ tx = dx; tz = dz; tl = 1; } tx /= tl; tz /= tl;
+      let ndx = dx*0.35 + tx*0.65, ndz = dz*0.35 + tz*0.65, nl = Math.hypot(ndx, ndz); dx = ndx/nl; dz = ndz/nl;
+      sx = cx; sz = cz; total += step; path.push({ x:sx, z:sz, dx, dz });
+      if(total > 100 && Math.hypot(sx - path[0].x, sz - path[0].z) < 12) break;             // looped back to start
+    }
+    // drop a ring every SPACING metres along the traced line, up to N
+    const chosen = []; let acc = 1e9;
+    for(const p of path){ if(!chosen.length){ chosen.push(p); acc = 0; continue; }
+      acc += Math.hypot(p.x - chosen[chosen.length - 1].x, p.z - chosen[chosen.length - 1].z);
+      if(acc >= SPACING){ chosen.push(p); acc = 0; } if(chosen.length >= N) break; }
+    if(chosen.length < 3) return;
     for(const p of chosen){
-      const y = hAt(p.x, p.z) + 1.35, k = p.k;
-      const gx = dist[k + 1] - dist[k - 1], gz = dist[k + W] - dist[k - W];               // gradient points across the road
-      let tx = -gz, tz = gx, tl = Math.hypot(tx, tz); if(tl < 1e-3){ tx = 1; tz = 0; tl = 1; } tx /= tl; tz /= tl;
+      const y = hAt(p.x, p.z) + 1.35;
       const o = ringMesh(COL.base); o.position.set(p.x, y, p.z);
-      o.lookAt(o.position.clone().add(new THREE.Vector3(tx, 0, tz)));                      // torus hole-axis faces along travel
+      o.lookAt(o.position.clone().add(new THREE.Vector3(p.dx, 0, p.dz)));                    // gate faces along the racing line
       o.visible = false; group.add(o);
       rings.push({ o, x:p.x, z:p.z, y, got:false });
     }
